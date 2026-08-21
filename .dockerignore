@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+data
+runs
+artifacts
+checkpoints
+dist
+__pycache__
+.coverage
+.mypy_cache
+.pytest_cache
+.ruff_cache
