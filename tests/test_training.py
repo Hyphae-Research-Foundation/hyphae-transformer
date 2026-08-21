@@ -150,6 +150,44 @@ def test_lab_runner_writes_complete_evidence(tmp_path: Path) -> None:
     assert (run_path / "checkpoints" / "history.jsonl").exists()
 
 
+def test_reconstructed_manifest_reuses_completed_run(tmp_path: Path) -> None:
+    registry = Registry(tmp_path)
+    budget = Budget(max_wall_seconds=60, max_failures=0)
+    item = Hypothesis(
+        claim="Reconstructed run remains idempotent.",
+        baseline="pre_rms",
+        candidate="crz_rms",
+        context={"dataset": "synthetic"},
+        independent_variables=("strategy",),
+        dependent_variables=("loss",),
+        prediction="finite",
+        minimum_effect=0,
+        falsification=("Non-finite state.",),
+        budget=budget,
+    )
+    registry.register_hypothesis(item)
+    assert item.hypothesis_id is not None
+    training = TrainConfig(steps=1, batch_size=1, seed=9)
+    first = RunManifest(
+        hypothesis_id=item.hypothesis_id,
+        stage=RunStage.MINI_PILOT,
+        seed=9,
+        config=staged_config(model=model_config(), training=training),
+        budget=budget,
+        created_at="first",
+    )
+    second = RunManifest(
+        hypothesis_id=item.hypothesis_id,
+        stage=RunStage.MINI_PILOT,
+        seed=9,
+        config=staged_config(model=model_config(), training=training),
+        budget=budget,
+        created_at="second",
+    )
+    expected = run_registered_synthetic(registry, first)
+    assert run_registered_synthetic(registry, second) == expected
+
+
 def test_lab_runner_records_corpus_metrics(tmp_path: Path) -> None:
     data = tmp_path / "data"
     data.mkdir()
