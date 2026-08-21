@@ -105,3 +105,13 @@ training-token crossings were `(512k, 614.4k, 512k)` for `pre_rms` and
 
 This rung does not justify cloud promotion. The next efficient action is increasing
 local seed count or repeating at a deeper model before paying for larger hardware.
+
+### Preregistered Eight-Seed Extension
+
+Because the three-seed point effect was above the 1% minimum but its interval was
+wide, the next rung fixes eight total seeds before additional computation. It reuses
+the immutable runs for seeds 7, 17, and 29 and adds seeds 41, 53, 67, 79, and 97 with
+the identical 12-layer, 1,024,000-token configuration. All five new seeds must run
+unless the declared failure budget is exceeded. The primary verdict remains based on
+the paired final validation-NLL effect and its 95% Student-t interval; the 1.8-NLL
+crossing is secondary.

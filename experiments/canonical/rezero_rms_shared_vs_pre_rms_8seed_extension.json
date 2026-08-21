@@ -1,0 +1,45 @@
+{
+  "analysis": {
+    "confidence_interval": "paired_student_t_95",
+    "minimum_effect": 0.01,
+    "primary_metric": "validation_nll",
+    "secondary_metric": "tokens_to_1_8_nll",
+    "verdict_rule": "positive only when the paired relative-effect 95% confidence interval lower bound is at least 0.01"
+  },
+  "baseline": "pre_rms",
+  "budget_per_run": {
+    "max_artifact_bytes": 250000000,
+    "max_cost_usd": 0.0,
+    "max_device_hours": 3.0,
+    "max_failures": 1,
+    "max_wall_seconds": 10800
+  },
+  "candidate": "rezero_rms_shared",
+  "claim": "Branch-normalized shared-gate ReZero improves final validation NLL over Pre-RMS by at least 1% under equal token and tuning budgets.",
+  "conditions": {
+    "batch_size": 8,
+    "d_model": 192,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 12,
+    "sequence_length": 128,
+    "steps": 1000,
+    "training_bytes": 2000000,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 100,
+    "validation_nll_threshold": 1.8
+  },
+  "extension": {
+    "all_seeds": [7, 17, 29, 41, 53, 67, 79, 97],
+    "initial_campaign_id": "C-cf456e9b29840fcb",
+    "initial_seeds": [7, 17, 29],
+    "new_seeds": [41, 53, 67, 79, 97],
+    "reason": "The initial paired effect was +1.92%, but its 95% confidence interval [-0.66%, +4.51%] crossed the preregistered 1% minimum."
+  },
+  "falsification": [
+    "The eight-seed paired 95% confidence interval lower bound remains below 1%.",
+    "Any condition receives a larger token or tuning budget.",
+    "The result depends on excluding a finite completed seed."
+  ],
+  "stopping_rule": "Run all five additional seeds unless the declared failure budget is exceeded; do not stop for an interim positive or negative effect."
+}
