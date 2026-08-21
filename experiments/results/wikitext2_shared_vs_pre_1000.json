@@ -1,0 +1,51 @@
+{
+  "analysis": {
+    "metric": "validation_nll",
+    "minimum_effect": 0.01,
+    "paired_relative_effect": 0.019234994937230097,
+    "paired_relative_effect_95_ci": [
+      -0.0066326747890436254,
+      0.04510266466350382
+    ],
+    "verdict": "inconclusive"
+  },
+  "campaign_id": "C-cf456e9b29840fcb",
+  "conditions": {
+    "batch_size": 8,
+    "d_model": 192,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 12,
+    "seeds": [7, 17, 29],
+    "sequence_length": 128,
+    "steps": 1000,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 100
+  },
+  "pre_rms": {
+    "mean_validation_nll": 1.5737523922823762,
+    "mean_validation_nll_95_ci": [
+      1.5504791645373477,
+      1.5970256200274047
+    ],
+    "mean_tokens_per_second": 8015.790970985093,
+    "peak_memory_bytes": 300199936,
+    "tokens_to_1_8_nll": [512000, 614400, 512000]
+  },
+  "rezero_rms_shared": {
+    "mean_validation_nll": 1.543481272984371,
+    "mean_validation_nll_95_ci": [
+      1.5256891191918764,
+      1.5612734267768655
+    ],
+    "mean_tokens_per_second": 7488.909835397113,
+    "peak_memory_bytes": 319092736,
+    "tokens_to_1_8_nll": [512000, 409600, 512000]
+  },
+  "threshold_analysis": {
+    "nll_threshold": 1.8,
+    "paired_relative_effect": 0.125,
+    "paired_relative_effect_95_ci": [-0.41283159125, 0.66283159125],
+    "verdict": "inconclusive"
+  }
+}
