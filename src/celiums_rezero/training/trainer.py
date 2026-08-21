@@ -146,7 +146,7 @@ class CheckpointManager:
         torch.set_rng_state(payload["torch_rng_state"].cpu())
         cuda_state = payload.get("cuda_rng_state")
         if cuda_state is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(cuda_state)
+            torch.cuda.set_rng_state_all([state.cpu() for state in cuda_state])
         raw_curve = payload.get("validation_curve", [])
         if not isinstance(raw_curve, list):
             raise TypeError("checkpoint validation curve must be a list")

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 
 import pytest
 import torch
 
+from celiums_rezero.data.synthetic import SyntheticSequenceSource
 from celiums_rezero.lab.registry import Registry
 from celiums_rezero.lab.runner import (
     run_manifest,
@@ -291,6 +293,39 @@ def test_checkpoint_reconciles_uncommitted_history_tail(tmp_path: Path) -> None:
     )
     assert resumed.final_loss == expected.final_loss
     assert manager.history_path.read_text().count("\n") == 4
+
+
+def test_checkpoint_cuda_rng_states_are_restored_from_cpu_tensors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = model_config()
+    model = ReZeroLM(config)
+    source = SyntheticSequenceSource(
+        vocab_size=config.vocab_size,
+        sequence_length=config.max_sequence_length,
+        seed=3,
+    )
+    optimizer = torch.optim.AdamW(model.parameters())
+    manager = CheckpointManager(tmp_path)
+    payload = {
+        "version": 1,
+        "completed_steps": 0,
+        "tokens": 0,
+        "losses": [],
+        "elapsed_seconds": 0.0,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "source": source.state_dict(),
+        "python_random_state": random.getstate(),
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state": [torch.arange(4, dtype=torch.uint8)],
+    }
+    torch.save(payload, manager.path)
+    restored: list[torch.Tensor] = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "set_rng_state_all", lambda states: restored.extend(states))
+    manager.load(model, optimizer, source, device=torch.device("cpu"))
+    assert restored and all(state.device.type == "cpu" for state in restored)
 
 
 def test_serialized_manifest_dispatches_to_allowlisted_runner(tmp_path: Path) -> None:
