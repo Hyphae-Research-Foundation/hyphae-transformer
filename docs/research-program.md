@@ -167,3 +167,12 @@ The depth result strengthens the optimization-speed signal but still does not sa
 the primary final-NLL criterion. The next depth rung should be preregistered at 48
 layers; cloud promotion remains deferred until local memory/runtime feasibility is
 measured.
+
+### Preregistered 48-Layer Rung
+
+The 48-layer rung preserves the 24-layer campaign's width, optimizer, batch size,
+sequence length, one-million-token budget, validation grid, threshold, and seeds. A
+local CUDA feasibility gate runs both strategies for 10 steps at the exact full-run
+shape before any full campaign starts. The gate requires finite state and peak memory
+below 7.5 GB for both conditions. If it passes, all six full runs must complete unless
+the declared failure budget is exceeded; interim effects do not authorize stopping.
