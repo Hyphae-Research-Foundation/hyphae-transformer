@@ -132,3 +132,12 @@ The extension falsifies the claim at the declared practical-effect threshold for
 12-layer, one-million-token condition. Additional seeds at the same condition are not
 authorized. Future work should test whether depth changes the effect rather than
 continuing to narrow this interval.
+
+### Preregistered 24-Layer Rung
+
+The depth axis is tested next with 24 layers while preserving the 12-layer campaign's
+width, batch size, sequence length, optimizer settings, one-million-token budget,
+validation grid, threshold, and seeds 7, 17, and 29. The primary verdict remains the
+paired final validation-NLL effect against the +1% practical minimum. All six runs
+must complete unless the declared failure budget is exceeded; interim curves do not
+authorize optional stopping.

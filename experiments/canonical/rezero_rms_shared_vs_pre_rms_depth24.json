@@ -1,0 +1,44 @@
+{
+  "analysis": {
+    "confidence_interval": "paired_student_t_95",
+    "minimum_effect": 0.01,
+    "primary_metric": "validation_nll",
+    "secondary_metrics": [
+      "tokens_to_1_8_nll",
+      "tokens_per_second",
+      "peak_memory_bytes",
+      "failed_seed_rate"
+    ],
+    "verdict_rule": "positive only when the paired relative-effect 95% confidence interval lower bound is at least 0.01"
+  },
+  "baseline": "pre_rms",
+  "budget_per_run": {
+    "max_artifact_bytes": 500000000,
+    "max_cost_usd": 0.0,
+    "max_device_hours": 3.0,
+    "max_failures": 1,
+    "max_wall_seconds": 10800
+  },
+  "candidate": "rezero_rms_shared",
+  "claim": "At 24 layers, branch-normalized shared-gate ReZero improves final validation NLL over Pre-RMS by at least 1% under equal token and tuning budgets.",
+  "conditions": {
+    "batch_size": 8,
+    "d_model": 192,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 24,
+    "seeds": [7, 17, 29],
+    "sequence_length": 128,
+    "steps": 1000,
+    "training_bytes": 2000000,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 100,
+    "validation_nll_threshold": 1.8
+  },
+  "falsification": [
+    "The paired 95% confidence interval lower bound is below 1%.",
+    "Any condition receives a larger token or tuning budget.",
+    "The result depends on excluding a finite completed seed."
+  ],
+  "stopping_rule": "Run all six condition-seed runs unless the declared failure budget is exceeded; do not stop for an interim positive or negative effect."
+}
