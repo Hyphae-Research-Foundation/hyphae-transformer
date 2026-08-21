@@ -1,0 +1,58 @@
+{
+  "analysis": {
+    "metric": "validation_nll",
+    "minimum_effect": 0.01,
+    "paired_relative_effect": 0.011338419568340263,
+    "paired_relative_effect_95_ci": [
+      0.0058538797523986965,
+      0.01682295938428183
+    ],
+    "verdict": "inconclusive"
+  },
+  "campaign_id": "C-f3385916e761e4a3",
+  "conditions": {
+    "batch_size": 8,
+    "d_model": 192,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 48,
+    "seeds": [7, 17, 29],
+    "sequence_length": 128,
+    "steps": 1000,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 100
+  },
+  "feasibility": {
+    "campaign_id": "C-fec9dcf136d96339",
+    "passed": true,
+    "pre_rms_peak_memory_bytes": 977854464,
+    "rezero_rms_shared_peak_memory_bytes": 1053425664,
+    "steps": 10
+  },
+  "pre_rms": {
+    "mean_validation_nll": 1.5380946954315506,
+    "mean_validation_nll_95_ci": [
+      1.5239602324568977,
+      1.5522291584062036
+    ],
+    "mean_tokens_per_second": 2357.549106006684,
+    "peak_memory_bytes": 977854464,
+    "tokens_to_1_8_nll": [512000, 512000, 512000]
+  },
+  "rezero_rms_shared": {
+    "mean_validation_nll": 1.5206551324389093,
+    "mean_validation_nll_95_ci": [
+      1.5072483302784592,
+      1.5340619345993594
+    ],
+    "mean_tokens_per_second": 2128.4819986123243,
+    "peak_memory_bytes": 1053425664,
+    "tokens_to_1_8_nll": [409600, 409600, 409600]
+  },
+  "threshold_analysis": {
+    "nll_threshold": 1.8,
+    "paired_relative_effect": 0.2,
+    "paired_relative_effect_95_ci": [0.2, 0.2],
+    "verdict": "positive"
+  }
+}
