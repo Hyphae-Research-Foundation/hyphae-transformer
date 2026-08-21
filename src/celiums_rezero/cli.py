@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     pilot.add_argument("--max-wall-seconds", type=float, default=1800)
     pilot.add_argument("--max-device-hours", type=float, default=0.5)
     pilot.add_argument("--max-artifact-bytes", type=int, default=100_000_000)
+    pilot.add_argument("--max-failures", type=int, default=0)
     pilot.add_argument("--validation-every-steps", type=int)
     pilot.add_argument("--validation-nll-threshold", type=float)
     pilot.add_argument(
@@ -113,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     enwiki8.add_argument("--max-wall-seconds", type=float, default=3600)
     enwiki8.add_argument("--max-device-hours", type=float, default=1.0)
     enwiki8.add_argument("--max-artifact-bytes", type=int, default=100_000_000)
+    enwiki8.add_argument("--max-failures", type=int, default=0)
     enwiki8.add_argument("--validation-every-steps", type=int)
     enwiki8.add_argument("--validation-nll-threshold", type=float)
     enwiki8.add_argument(
@@ -235,7 +237,7 @@ def command_pilot_wikitext2(arguments: argparse.Namespace) -> int:
     budget = Budget(
         max_wall_seconds=arguments.max_wall_seconds,
         max_device_hours=arguments.max_device_hours,
-        max_failures=0,
+        max_failures=arguments.max_failures,
         max_artifact_bytes=arguments.max_artifact_bytes,
     )
     hypothesis = Hypothesis(
@@ -330,7 +332,7 @@ def command_pilot_enwiki8(arguments: argparse.Namespace) -> int:
     budget = Budget(
         max_wall_seconds=arguments.max_wall_seconds,
         max_device_hours=arguments.max_device_hours,
-        max_failures=0,
+        max_failures=arguments.max_failures,
         max_artifact_bytes=arguments.max_artifact_bytes,
     )
     hypothesis = Hypothesis(

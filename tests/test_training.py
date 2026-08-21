@@ -328,6 +328,38 @@ def test_checkpoint_cuda_rng_states_are_restored_from_cpu_tensors(
     assert restored and all(state.device.type == "cpu" for state in restored)
 
 
+def test_checkpoint_source_rng_state_is_moved_to_cpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = model_config()
+    model = ReZeroLM(config)
+    source = SyntheticSequenceSource(
+        vocab_size=config.vocab_size,
+        sequence_length=config.max_sequence_length,
+        seed=3,
+    )
+    optimizer = torch.optim.AdamW(model.parameters())
+    manager = CheckpointManager(tmp_path)
+    payload = {
+        "version": 1,
+        "completed_steps": 0,
+        "tokens": 0,
+        "losses": [],
+        "elapsed_seconds": 0.0,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "source": {"generator_state": torch.arange(4, dtype=torch.uint8)},
+        "python_random_state": random.getstate(),
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state": None,
+    }
+    torch.save(payload, manager.path)
+    restored: list[torch.Tensor] = []
+    monkeypatch.setattr(source, "load_state_dict", lambda state: restored.extend(state.values()))
+    manager.load(model, optimizer, source, device=torch.device("cpu"))
+    assert restored and all(state.device.type == "cpu" for state in restored)
+
+
 def test_serialized_manifest_dispatches_to_allowlisted_runner(tmp_path: Path) -> None:
     registry = Registry(tmp_path)
     budget = Budget(max_wall_seconds=60, max_failures=0)
