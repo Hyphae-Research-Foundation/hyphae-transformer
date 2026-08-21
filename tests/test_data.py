@@ -61,6 +61,26 @@ def test_corpus_evaluation_covers_each_transition_once() -> None:
     assert evaluation.bits_per_token > 0
 
 
+def test_corpus_evaluation_restores_model_mode_after_timeout() -> None:
+    model = ReZeroLM(
+        ModelConfig(
+            vocab_size=32,
+            max_sequence_length=4,
+            n_layers=1,
+            d_model=16,
+            n_heads=2,
+            d_ff=32,
+        )
+    ).train()
+    with pytest.raises(TimeoutError):
+        evaluate_corpus(
+            model,
+            torch.arange(10, dtype=torch.long),
+            deadline=0.0,
+        )
+    assert model.training
+
+
 def test_prepare_wikitext2_downloads_and_verifies_splits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

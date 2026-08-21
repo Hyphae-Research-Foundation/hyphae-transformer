@@ -31,6 +31,18 @@ def render_run_report(
         "</tr>"
         for metric in metrics
     )
+    curve_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(curve.get('name', '')))}</td>"
+        f"<td>{html.escape(str(point.get('step', '')))}</td>"
+        f"<td>{html.escape(str(point.get('training_tokens', '')))}</td>"
+        f"<td>{html.escape(str(point.get('value', '')))}</td>"
+        "</tr>"
+        for curve in result.get("curves", [])
+        if isinstance(curve, dict)
+        for point in curve.get("points", [])
+        if isinstance(point, dict)
+    )
     document = f"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -49,6 +61,9 @@ pre {{ background: #eef4f1; padding: 1rem; overflow: auto; }}
 <p>{html.escape(str(result.get('summary', '')))}</p>
 <h2>Metrics</h2>
 <table><thead><tr><th>Name</th><th>Value</th><th>Unit</th></tr></thead><tbody>{metric_rows}</tbody></table>
+<h2>Curves</h2>
+<table><thead><tr><th>Name</th><th>Step</th><th>Training tokens</th><th>Value</th></tr>
+</thead><tbody>{curve_rows}</tbody></table>
 <h2>Manifest</h2>
 <pre>{html.escape(json.dumps(manifest, sort_keys=True, indent=2))}</pre>
 </html>

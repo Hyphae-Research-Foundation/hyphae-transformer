@@ -65,6 +65,12 @@ Completed manifests are idempotent.
 protocol. `run-manifest` executes a strict, versioned manifest through an allowlisted
 runner, which is also the entry point used by the included container image.
 
+Corpus manifests use portable paths relative to an execution-time `--data-root`.
+Periodic validation can be enabled with `--validation-every-steps`; an optional
+`--validation-nll-threshold` records the first observed training-token crossing.
+Campaign comparisons pair observations by seed and report 95% Student-t confidence
+intervals without an additional statistics dependency.
+
 Autoregressive generation uses per-layer grouped-query KV caches until a sliding
 context window must be rebuilt; `use_cache=False` remains available as a reference
 path.

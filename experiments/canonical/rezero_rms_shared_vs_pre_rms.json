@@ -1,0 +1,30 @@
+{
+  "baseline": "pre_rms",
+  "budget": {
+    "max_artifact_bytes": 250000000,
+    "max_cost_usd": 0.0,
+    "max_device_hours": 3.0,
+    "max_failures": 1,
+    "max_wall_seconds": 10800
+  },
+  "candidate": "rezero_rms_shared",
+  "claim": "Branch-normalized shared-gate ReZero improves optimization over Pre-RMS under equal token and tuning budgets.",
+  "context": {
+    "dataset": "wikitext2_byte_v1",
+    "depths": [12, 24, 48],
+    "seeds": [7, 17, 29],
+    "validation_every_steps": 100
+  },
+  "dependent_variables": [
+    "validation_nll_curve",
+    "tokens_to_threshold",
+    "failed_seed_rate"
+  ],
+  "falsification": [
+    "The paired 95% confidence interval overlaps the preregistered 1% minimum effect.",
+    "The candidate requires a larger tuning or token budget."
+  ],
+  "independent_variables": ["residual_strategy"],
+  "minimum_effect": 0.01,
+  "prediction": "candidate_better"
+}
