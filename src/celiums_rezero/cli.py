@@ -74,6 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     pilot.add_argument("--evaluation-bytes", type=int, default=100_000)
     pilot.add_argument("--seeds", nargs="+", type=int, default=[7])
     pilot.add_argument("--minimum-effect", type=float, default=0.01)
+    pilot.add_argument("--max-wall-seconds", type=float, default=1800)
+    pilot.add_argument("--max-device-hours", type=float, default=0.5)
+    pilot.add_argument("--max-artifact-bytes", type=int, default=100_000_000)
     pilot.add_argument("--validation-every-steps", type=int)
     pilot.add_argument("--validation-nll-threshold", type=float)
     pilot.add_argument(
@@ -107,6 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
     enwiki8.add_argument("--evaluation-bytes", type=int, default=100_000)
     enwiki8.add_argument("--seeds", nargs="+", type=int, default=[7])
     enwiki8.add_argument("--minimum-effect", type=float, default=0.01)
+    enwiki8.add_argument("--max-wall-seconds", type=float, default=3600)
+    enwiki8.add_argument("--max-device-hours", type=float, default=1.0)
+    enwiki8.add_argument("--max-artifact-bytes", type=int, default=100_000_000)
     enwiki8.add_argument("--validation-every-steps", type=int)
     enwiki8.add_argument("--validation-nll-threshold", type=float)
     enwiki8.add_argument(
@@ -226,7 +232,12 @@ def command_pilot_wikitext2(arguments: argparse.Namespace) -> int:
     required = {arguments.baseline, arguments.candidate}
     if not required <= set(arguments.strategies):
         raise ValueError("campaign strategies must include the baseline and candidate")
-    budget = Budget(max_wall_seconds=1800, max_device_hours=0.5, max_failures=0)
+    budget = Budget(
+        max_wall_seconds=arguments.max_wall_seconds,
+        max_device_hours=arguments.max_device_hours,
+        max_failures=0,
+        max_artifact_bytes=arguments.max_artifact_bytes,
+    )
     hypothesis = Hypothesis(
         claim="Residual strategies differ in finite byte-level WikiText-2 optimization.",
         baseline=arguments.baseline,
@@ -316,7 +327,12 @@ def command_pilot_enwiki8(arguments: argparse.Namespace) -> int:
     if not required <= set(arguments.strategies):
         raise ValueError("campaign strategies must include the baseline and candidate")
     registry = Registry(arguments.run_root)
-    budget = Budget(max_wall_seconds=3600, max_device_hours=1.0, max_failures=0)
+    budget = Budget(
+        max_wall_seconds=arguments.max_wall_seconds,
+        max_device_hours=arguments.max_device_hours,
+        max_failures=0,
+        max_artifact_bytes=arguments.max_artifact_bytes,
+    )
     hypothesis = Hypothesis(
         claim="Residual strategies differ on canonical raw-byte enwiki8 optimization.",
         baseline=arguments.baseline,
