@@ -176,3 +176,26 @@ local CUDA feasibility gate runs both strategies for 10 steps at the exact full-
 shape before any full campaign starts. The gate requires finite state and peak memory
 below 7.5 GB for both conditions. If it passes, all six full runs must complete unless
 the declared failure budget is exceeded; interim effects do not authorize stopping.
+
+### 48-Layer Result
+
+The feasibility gate passed for both strategies at the exact full-run shape. Peak
+memory was 0.98 GB for `pre_rms` and 1.05 GB for `rezero_rms_shared`, well below the
+7.5 GB stop limit, and both 10-step runs remained finite.
+
+All six full runs then completed without failure. Final validation NLL was 1.5207 for
+`rezero_rms_shared` and 1.5381 for `pre_rms`. The paired relative improvement was
++1.13%, with a 95% confidence interval of [+0.59%, +1.68%]. The interval excludes
+zero but its lower bound remains below the preregistered +1% minimum, so the primary
+verdict is **inconclusive**.
+
+The secondary threshold signal replicated: every `pre_rms` seed first crossed 1.8
+NLL at 512,000 tokens, while every shared-gate seed crossed at 409,600 tokens. The
+paired reduction is 20%, with a collapsed interval of [20%, 20%]. Shared-gate ReZero
+used about 7.7% more peak memory and delivered about 9.7% lower throughput.
+
+Across 24 and 48 layers, shared-gate ReZero consistently reaches the 1.8-NLL target
+20% earlier, while final-NLL practical superiority remains just below the declared
+confidence threshold. Local feasibility is established; a cloud scale-up is now
+scientifically defensible only if it targets a larger parameter or sequence-length
+rung rather than repeating the same depth condition.
