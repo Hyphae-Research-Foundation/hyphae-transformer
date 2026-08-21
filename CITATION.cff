@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use Celiums ReZero, cite this software and the original ReZero paper."
+title: "Celiums ReZero"
+type: software
+version: 0.1.0
+date-released: 2026-08-21
+authors:
+  - family-names: Gutierrez
+    given-names: Mario
+repository-code: "https://github.com/celiumsai/celiums-rezero"
+license: MIT
+preferred-citation:
+  type: conference-paper
+  title: "ReZero is All You Need: Fast Convergence at Large Depth"
+  authors:
+    - family-names: Bachlechner
+      given-names: Thomas
+    - family-names: Majumder
+      given-names: Bodhisattwa Prasad
+    - family-names: Mao
+      given-names: Huanru Henry
+    - family-names: Cottrell
+      given-names: Garrison W.
+    - family-names: McAuley
+      given-names: Julian
+  year: 2021
+  collection-title: "Proceedings of the Thirty-Seventh Conference on Uncertainty in Artificial Intelligence"
+  volume: 161
+  start: 1352
+  end: 1361
+  url: "https://proceedings.mlr.press/v161/bachlechner21a.html"

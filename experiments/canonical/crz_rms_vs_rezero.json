@@ -1,0 +1,29 @@
+{
+  "baseline": "rezero_canonical",
+  "budget": {
+    "max_artifact_bytes": 100000000,
+    "max_cost_usd": 0.0,
+    "max_device_hours": 1.0,
+    "max_failures": 1,
+    "max_wall_seconds": 3600
+  },
+  "candidate": "crz_rms",
+  "claim": "Separate attention and MLP gates with branch-local RMSNorm improve deep decoder optimization over canonical ReZero.",
+  "context": {
+    "dataset": "wikitext2",
+    "depths": [12, 24, 48, 96],
+    "parameter_budget": "matched"
+  },
+  "dependent_variables": [
+    "validation_nll",
+    "tokens_to_threshold",
+    "failed_seed_rate"
+  ],
+  "falsification": [
+    "The candidate misses the minimum effect across three seeds.",
+    "The effect disappears under equal tuning and token budgets."
+  ],
+  "independent_variables": ["residual_strategy"],
+  "minimum_effect": 0.1,
+  "prediction": "candidate_better"
+}

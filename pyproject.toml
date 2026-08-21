@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "celiums-rezero"
+version = "0.1.0"
+description = "A modern ReZero research framework, decoder-only language model, and reproducible architecture lab"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Celiums Solutions LLC" },
+  { name = "Mario Gutierrez" },
+]
+keywords = ["rezero", "transformer", "deep-learning", "research", "pytorch"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "numpy>=2.0,<3",
+  "torch>=2.6,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15",
+  "pytest>=8.3",
+  "pytest-cov>=6",
+  "ruff>=0.11",
+]
+
+[project.scripts]
+celiums-rezero = "celiums_rezero.cli:main"
+
+[project.urls]
+Repository = "https://github.com/celiumsai/celiums-rezero"
+Paper = "https://proceedings.mlr.press/v161/bachlechner21a.html"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/celiums_rezero"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
