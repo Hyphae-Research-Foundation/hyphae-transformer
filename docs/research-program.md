@@ -115,3 +115,20 @@ the identical 12-layer, 1,024,000-token configuration. All five new seeds must r
 unless the declared failure budget is exceeded. The primary verdict remains based on
 the paired final validation-NLL effect and its 95% Student-t interval; the 1.8-NLL
 crossing is secondary.
+
+### Eight-Seed Extension Result
+
+All five additional seeds completed, producing eight paired observations and no
+failures. Final validation NLL was 1.5490 for `rezero_rms_shared` and 1.5672 for
+`pre_rms`. The paired relative improvement was +1.16%, with a 95% confidence
+interval of [+0.17%, +2.15%]. The interval excludes zero but its lower bound remains
+below the preregistered +1% minimum, so the formal verdict is **inconclusive**.
+
+For the secondary 1.8-NLL threshold, the paired mean token improvement was +4.88%
+with a 95% interval of [-6.66%, +16.41%], also inconclusive. Shared-gate ReZero
+retained its quality signal but remained slower and more memory-intensive.
+
+The extension falsifies the claim at the declared practical-effect threshold for this
+12-layer, one-million-token condition. Additional seeds at the same condition are not
+authorized. Future work should test whether depth changes the effect rather than
+continuing to narrow this interval.
