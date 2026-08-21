@@ -82,3 +82,26 @@ Validation NLL is sampled on a fixed step grid, tokens-to-threshold uses the fir
 observed crossing without interpolation, and comparisons are paired by seed. Point
 effects are promoted only when their paired 95% Student-t confidence interval clears
 the minimum effect.
+
+### WikiText-2 1M-Token Result
+
+The preregistered 12-layer campaign completed 1,000 steps and 1,024,000 training
+tokens for seeds 7, 17, and 29 with no failures.
+
+| Strategy | Validation NLL | 95% CI | Tokens/s |
+|---|---:|---:|---:|
+| `rezero_rms_shared` | 1.5435 | [1.5257, 1.5613] | 7,489 |
+| `pre_rms` | 1.5738 | [1.5505, 1.5970] | 8,016 |
+
+The paired relative NLL effect was +1.92%, but its 95% confidence interval was
+[-0.66%, +4.51%]. It did not clear the preregistered +1% minimum with confidence, so
+the verdict is **inconclusive**. Shared-gate ReZero used about 6.6% more peak memory
+and had about 6.6% lower throughput in this configuration.
+
+At the 1.8 NLL threshold, both conditions reached the target for all seeds. Observed
+training-token crossings were `(512k, 614.4k, 512k)` for `pre_rms` and
+`(512k, 409.6k, 512k)` for `rezero_rms_shared`. The paired mean improvement was
+12.5%, but the 95% confidence interval was [-41.3%, +66.3%], also inconclusive.
+
+This rung does not justify cloud promotion. The next efficient action is increasing
+local seed count or repeating at a deeper model before paying for larger hardware.
