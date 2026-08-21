@@ -32,6 +32,14 @@ class Registry:
         run_directory = self.runs / manifest.run_id
         run_directory.mkdir(parents=True, exist_ok=True)
         path = run_directory / "manifest.json"
+        if path.exists():
+            existing = self.run_manifest(manifest.run_id)
+            proposed = read_json_from_value(manifest)
+            existing.pop("created_at", None)
+            proposed.pop("created_at", None)
+            if canonical_json(existing) != canonical_json(proposed):
+                raise FileExistsError(f"immutable registry record differs: {path}")
+            return path
         self._write_once(path, manifest)
         return path
 
@@ -91,3 +99,12 @@ class Registry:
     def _validate_id(value: str, prefix: str) -> None:
         if not value.startswith(prefix) or not value.removeprefix(prefix).isalnum():
             raise ValueError(f"unsafe registry identifier: {value}")
+
+
+def read_json_from_value(value: object) -> dict[str, object]:
+    import json
+
+    parsed = json.loads(canonical_json(value))
+    if not isinstance(parsed, dict):
+        raise TypeError("registry value must serialize to an object")
+    return cast(dict[str, object], parsed)
