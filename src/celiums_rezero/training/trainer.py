@@ -141,9 +141,20 @@ class CheckpointManager:
             raise ValueError("checkpoint training protocol does not match the requested run")
         model.load_state_dict(payload["model"])
         optimizer.load_state_dict(payload["optimizer"])
-        source.load_state_dict(payload["source"])
+        source_state = payload["source"]
+        if not isinstance(source_state, dict):
+            raise TypeError("checkpoint source state must be a dictionary")
+        source.load_state_dict(
+            {
+                name: value.cpu() if isinstance(value, torch.Tensor) else value
+                for name, value in source_state.items()
+            }
+        )
         random.setstate(payload["python_random_state"])
-        torch.set_rng_state(payload["torch_rng_state"].cpu())
+        torch_rng_state = payload["torch_rng_state"]
+        if not isinstance(torch_rng_state, torch.Tensor):
+            raise TypeError("checkpoint torch RNG state must be a tensor")
+        torch.set_rng_state(torch_rng_state.cpu())
         cuda_state = payload.get("cuda_rng_state")
         if cuda_state is not None and torch.cuda.is_available():
             torch.cuda.set_rng_state_all([state.cpu() for state in cuda_state])
