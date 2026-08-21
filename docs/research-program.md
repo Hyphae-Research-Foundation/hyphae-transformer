@@ -141,3 +141,29 @@ validation grid, threshold, and seeds 7, 17, and 29. The primary verdict remains
 paired final validation-NLL effect against the +1% practical minimum. All six runs
 must complete unless the declared failure budget is exceeded; interim curves do not
 authorize optional stopping.
+
+### 24-Layer Result
+
+The exact preregistered campaign completed all six runs with no failures. Final
+validation NLL was 1.5273 for `rezero_rms_shared` and 1.5504 for `pre_rms`. The
+paired relative improvement was +1.49%, with a 95% confidence interval of
+[+0.14%, +2.84%]. The direction is supported, but the lower bound remains below the
+preregistered +1% practical minimum, so the primary verdict is **inconclusive**.
+
+The secondary threshold result was decisive on the fixed 100-step observation grid:
+all `pre_rms` seeds first crossed 1.8 NLL at 512,000 tokens, while all
+`rezero_rms_shared` seeds crossed at 409,600 tokens. This is a paired 20% reduction,
+with a collapsed 95% interval of [20%, 20%]. Shared-gate ReZero also used about 7.2%
+more peak memory; throughput was similar in the final valid run.
+
+Two earlier attempts are explicitly invalid evidence. The first exceeded the default
+100 MB artifact budget, which was below the preregistered 500 MB allowance. The
+second reused corrected budget values but exposed CUDA checkpoint RNG tensors being
+restored into CPU generators after tool timeout. Both attempts remain immutable in
+the local registry, and the defects were fixed through reviewed PRs before executing
+the fresh preregistered-budget campaign.
+
+The depth result strengthens the optimization-speed signal but still does not satisfy
+the primary final-NLL criterion. The next depth rung should be preregistered at 48
+layers; cloud promotion remains deferred until local memory/runtime feasibility is
+measured.

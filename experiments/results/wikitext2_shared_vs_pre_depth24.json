@@ -1,0 +1,61 @@
+{
+  "analysis": {
+    "metric": "validation_nll",
+    "minimum_effect": 0.01,
+    "paired_relative_effect": 0.014911794853130165,
+    "paired_relative_effect_95_ci": [
+      0.0014003737714413217,
+      0.02842321593481901
+    ],
+    "verdict": "inconclusive"
+  },
+  "campaign_id": "C-fef92c071121c228",
+  "conditions": {
+    "batch_size": 8,
+    "d_model": 192,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 24,
+    "seeds": [7, 17, 29],
+    "sequence_length": 128,
+    "steps": 1000,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 100
+  },
+  "invalid_attempts": [
+    {
+      "campaign_id": "C-24025fca3966b598",
+      "reason": "The default 100 MB artifact limit was below the preregistered 500 MB run allowance."
+    },
+    {
+      "campaign_id": "C-a396e3981b0c70f3",
+      "reason": "An interrupted CUDA run exposed checkpoint RNG tensors mapped to CUDA before restoring CPU generators."
+    }
+  ],
+  "pre_rms": {
+    "mean_validation_nll": 1.550419467103257,
+    "mean_validation_nll_95_ci": [
+      1.5202050735176964,
+      1.5806338606888175
+    ],
+    "mean_tokens_per_second": 4381.776970390873,
+    "peak_memory_bytes": 525914112,
+    "tokens_to_1_8_nll": [512000, 512000, 512000]
+  },
+  "rezero_rms_shared": {
+    "mean_validation_nll": 1.5272999300735137,
+    "mean_validation_nll_95_ci": [
+      1.5149280068286803,
+      1.539671853318347
+    ],
+    "mean_tokens_per_second": 4432.928196072641,
+    "peak_memory_bytes": 563699712,
+    "tokens_to_1_8_nll": [409600, 409600, 409600]
+  },
+  "threshold_analysis": {
+    "nll_threshold": 1.8,
+    "paired_relative_effect": 0.2,
+    "paired_relative_effect_95_ci": [0.2, 0.2],
+    "verdict": "positive"
+  }
+}
