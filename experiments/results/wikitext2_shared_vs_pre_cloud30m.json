@@ -1,0 +1,77 @@
+{
+  "analysis": {
+    "metric": "validation_nll",
+    "minimum_effect": 0.01,
+    "paired_relative_effect": 0.022523746900895498,
+    "paired_relative_effect_95_ci": [
+      -0.007906176513850909,
+      0.05295367031564191
+    ],
+    "verdict": "inconclusive"
+  },
+  "campaign_id": "C-509ea6ec16570235",
+  "cloud": {
+    "accelerator": "NVIDIA RTX 4000 Ada Generation",
+    "created_at": "2026-08-21T21:39:25Z",
+    "deleted_and_verified_absent": true,
+    "deletion_observed_at": "2026-08-21T22:26:35Z",
+    "droplet_id": 594159437,
+    "droplet_name": "celiums-rezero-30m-20260821",
+    "estimated_cost_usd": 0.5974444444444444,
+    "hourly_rate_usd": 0.76,
+    "lifetime_hours": 0.7861111111111111,
+    "maximum_cost_usd": 2.28,
+    "region": "tor1",
+    "size": "gpu-4000adax1-20gb"
+  },
+  "conditions": {
+    "batch_size": 8,
+    "d_ff": 1024,
+    "d_model": 512,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 12,
+    "parameter_count_candidate": 31602700,
+    "seeds": [7, 17, 29],
+    "sequence_length": 256,
+    "steps": 500,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 50
+  },
+  "feasibility": {
+    "campaign_id": "C-5635649ffde236f4",
+    "passed": true,
+    "pre_rms_peak_memory_bytes": 1386579968,
+    "rezero_rms_shared_peak_memory_bytes": 1487261696,
+    "steps": 10
+  },
+  "pre_rms": {
+    "mean_validation_nll": 1.5324221794092103,
+    "mean_validation_nll_95_ci": [
+      1.52917245990725,
+      1.5356718989111706
+    ],
+    "mean_tokens_per_second": 3695.6411216702236,
+    "peak_memory_bytes": 1336510464,
+    "tokens_to_1_8_nll": [512000, 512000, 512000]
+  },
+  "rezero_rms_shared": {
+    "mean_validation_nll": 1.4979062900948783,
+    "mean_validation_nll_95_ci": [
+      1.4542868351833806,
+      1.541525745006376
+    ],
+    "mean_tokens_per_second": 3770.7931372715975,
+    "peak_memory_bytes": 1437192192,
+    "tokens_to_1_8_nll": [512000, 409600, 409600]
+  },
+  "threshold_analysis": {
+    "nll_threshold": 1.8,
+    "paired_relative_effect": 0.13333333333333333,
+    "paired_relative_effect_95_ci": [
+      -0.15351018200000002,
+      0.4201768486666667
+    ],
+    "verdict": "inconclusive"
+  }
+}
