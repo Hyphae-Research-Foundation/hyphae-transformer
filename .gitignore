@@ -12,7 +12,7 @@ build/
 .env
 .env.*
 !*.example
-data/
+/data/
 artifacts/
 runs/
 checkpoints/
