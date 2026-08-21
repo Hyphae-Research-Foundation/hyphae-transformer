@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     execute = commands.add_parser("run-manifest", help="execute an immutable run manifest")
     execute.add_argument("manifest", type=Path)
     execute.add_argument("--registry", type=Path, required=True)
+    execute.add_argument("--data-root", type=Path)
 
     pilot = commands.add_parser("pilot-wikitext2", help="run a WikiText-2 campaign")
     pilot.add_argument("--data-root", type=Path, default=Path("data"))
@@ -73,6 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     pilot.add_argument("--evaluation-bytes", type=int, default=100_000)
     pilot.add_argument("--seeds", nargs="+", type=int, default=[7])
     pilot.add_argument("--minimum-effect", type=float, default=0.01)
+    pilot.add_argument("--validation-every-steps", type=int)
+    pilot.add_argument("--validation-nll-threshold", type=float)
     pilot.add_argument(
         "--baseline", choices=[item.value for item in ResidualStrategy], default="pre_rms"
     )
@@ -104,6 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
     enwiki8.add_argument("--evaluation-bytes", type=int, default=100_000)
     enwiki8.add_argument("--seeds", nargs="+", type=int, default=[7])
     enwiki8.add_argument("--minimum-effect", type=float, default=0.01)
+    enwiki8.add_argument("--validation-every-steps", type=int)
+    enwiki8.add_argument("--validation-nll-threshold", type=float)
     enwiki8.add_argument(
         "--baseline", choices=[item.value for item in ResidualStrategy], default="pre_rms"
     )
@@ -205,7 +210,11 @@ def command_run_manifest(arguments: argparse.Namespace) -> int:
     if not isinstance(values, dict):
         raise TypeError("manifest JSON must contain an object")
     manifest = RunManifest.from_dict(values)
-    result = run_manifest(Registry(arguments.registry), manifest)
+    result = run_manifest(
+        Registry(arguments.registry),
+        manifest,
+        data_root=arguments.data_root,
+    )
     print(json.dumps(to_primitive(result), indent=2, sort_keys=True))
     return 0 if result.failure is None else 1
 
@@ -253,6 +262,8 @@ def command_pilot_wikitext2(arguments: argparse.Namespace) -> int:
                 steps=arguments.steps,
                 batch_size=arguments.batch_size,
                 evaluation_batch_size=arguments.batch_size,
+                validation_every_steps=arguments.validation_every_steps,
+                validation_nll_threshold=arguments.validation_nll_threshold,
                 seed=seed,
                 device=device,
             )
@@ -263,6 +274,7 @@ def command_pilot_wikitext2(arguments: argparse.Namespace) -> int:
                 config=staged_corpus_config(
                     model=model,
                     training=training,
+                    data_root=arguments.data_root,
                     train_path=train_path,
                     validation_path=validation_path,
                     test_path=test_path,
@@ -272,7 +284,16 @@ def command_pilot_wikitext2(arguments: argparse.Namespace) -> int:
                 budget=budget,
                 data_revision=f"pytorch-examples:{WIKITEXT2_REVISION}",
             )
-            records.append((manifest, run_registered_corpus(registry, manifest)))
+            records.append(
+                (
+                    manifest,
+                    run_registered_corpus(
+                        registry,
+                        manifest,
+                        data_root=arguments.data_root,
+                    ),
+                )
+            )
     summary = summarize_campaign(
         records,
         baseline=arguments.baseline,
@@ -326,6 +347,8 @@ def command_pilot_enwiki8(arguments: argparse.Namespace) -> int:
                 steps=arguments.steps,
                 batch_size=arguments.batch_size,
                 evaluation_batch_size=arguments.batch_size,
+                validation_every_steps=arguments.validation_every_steps,
+                validation_nll_threshold=arguments.validation_nll_threshold,
                 seed=seed,
                 device=device,
             )
@@ -336,6 +359,7 @@ def command_pilot_enwiki8(arguments: argparse.Namespace) -> int:
                 config=staged_corpus_config(
                     model=model,
                     training=training,
+                    data_root=arguments.data_root,
                     train_path=path,
                     validation_path=path,
                     test_path=path,
@@ -349,7 +373,16 @@ def command_pilot_enwiki8(arguments: argparse.Namespace) -> int:
                 budget=budget,
                 data_revision=f"enwiki8:{ENWIKI8_SHA256}:raw-byte-v1",
             )
-            records.append((manifest, run_registered_corpus(registry, manifest)))
+            records.append(
+                (
+                    manifest,
+                    run_registered_corpus(
+                        registry,
+                        manifest,
+                        data_root=arguments.data_root,
+                    ),
+                )
+            )
     summary = summarize_campaign(
         records,
         baseline=arguments.baseline,

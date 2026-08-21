@@ -50,11 +50,14 @@ Build the pinned runtime and execute exactly one externally supplied manifest:
 docker build -t celiums-rezero:local .
 docker run --rm \
   -v "$PWD/manifest.json:/input/manifest.json:ro" \
+  -v "$PWD/data:/data:ro" \
   -v "$PWD/runs:/output" \
-  celiums-rezero:local run-manifest /input/manifest.json --registry /output
+  celiums-rezero:local run-manifest /input/manifest.json \
+  --registry /output --data-root /data
 ```
 
-For a DigitalOcean worker, mount downloaded data at the paths declared in the
-manifest and persist the registry directory to Spaces or another durable volume.
+For a DigitalOcean worker, mount the prepared corpus root read-only and bind it with
+`--data-root`; manifests contain only portable relative locators and content hashes.
+Persist the registry directory to Spaces or another durable volume.
 The worker must enforce its own hard process timeout in addition to the in-loop
 manifest wall-time budget. Provisioning remains an explicit promotion action.

@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-from celiums_rezero.lab.evaluator import Comparison, compare_means
+from celiums_rezero.lab.evaluator import ConfidenceInterval, compare_paired, student_t_interval
 from celiums_rezero.lab.schemas import RunManifest, RunResult, RunStatus, Verdict
 from celiums_rezero.lab.serialization import canonical_json, content_hash, to_primitive, write_json
 
@@ -24,6 +24,17 @@ class RunObservation:
     tokens_per_second: float | None
     peak_memory_bytes: float | None
     failure: str | None
+    curve: tuple[tuple[int, int, float], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CurveAggregatePoint:
+    step: int
+    training_tokens: int
+    observations: int
+    mean: float
+    stdev: float | None
+    confidence_interval: ConfidenceInterval | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +47,8 @@ class StrategyAggregate:
     metric_stdev: float | None
     tokens_per_second_mean: float | None
     peak_memory_bytes_max: float | None
+    metric_confidence_interval: ConfidenceInterval | None
+    validation_curve: tuple[CurveAggregatePoint, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +59,8 @@ class StrategyComparison:
     strategy_mean: float
     relative_effect: float
     verdict: Verdict
+    paired_seed_count: int
+    relative_effect_confidence_interval: ConfidenceInterval | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +77,13 @@ class CampaignSummary:
 
 def _metric(result: RunResult, name: str) -> float | None:
     return next((metric.value for metric in result.metrics if metric.name == name), None)
+
+
+def _curve(result: RunResult, name: str) -> tuple[tuple[int, int, float], ...]:
+    curve = next((item for item in result.curves if item.name == name), None)
+    if curve is None:
+        return ()
+    return tuple((point.step, point.training_tokens, point.value) for point in curve.points)
 
 
 def summarize_campaign(
@@ -101,6 +123,7 @@ def summarize_campaign(
                 tokens_per_second=_metric(result, "tokens_per_second"),
                 peak_memory_bytes=_metric(result, "peak_memory_bytes"),
                 failure=result.failure,
+                curve=_curve(result, metric),
             )
         )
 
@@ -140,6 +163,8 @@ def summarize_campaign(
                 ),
                 tokens_per_second_mean=statistics.fmean(throughputs) if throughputs else None,
                 peak_memory_bytes_max=max(peaks) if peaks else None,
+                metric_confidence_interval=student_t_interval(values),
+                validation_curve=_aggregate_curves(items),
             )
         )
 
@@ -152,15 +177,18 @@ def summarize_campaign(
         for aggregate in aggregates
     ):
         raise ValueError("all campaign strategies must use the same seeds")
-    baseline_values = _completed_values(by_strategy[baseline])
     comparisons: list[StrategyComparison] = []
     for aggregate in aggregates:
-        values = _completed_values(aggregate)
-        if aggregate.strategy == baseline or not baseline_values or not values:
+        if aggregate.strategy == baseline:
             continue
-        comparison: Comparison = compare_means(
-            baseline_values,
-            values,
+        baseline_by_seed = _completed_by_seed(by_strategy[baseline])
+        strategy_by_seed = _completed_by_seed(aggregate)
+        paired_seeds = sorted(baseline_by_seed.keys() & strategy_by_seed.keys())
+        if not paired_seeds:
+            continue
+        comparison = compare_paired(
+            [baseline_by_seed[seed] for seed in paired_seeds],
+            [strategy_by_seed[seed] for seed in paired_seeds],
             direction="minimize",
             minimum_effect=minimum_effect,
         )
@@ -172,6 +200,10 @@ def summarize_campaign(
                 strategy_mean=comparison.candidate_mean,
                 relative_effect=comparison.relative_effect,
                 verdict=comparison.verdict,
+                paired_seed_count=comparison.paired_count,
+                relative_effect_confidence_interval=(
+                    comparison.relative_effect_confidence_interval
+                ),
             )
         )
     candidate_comparison = next(
@@ -190,6 +222,8 @@ def summarize_campaign(
         "candidate": candidate,
         "metric": metric,
         "minimum_effect": minimum_effect,
+        "analysis_version": 2,
+        "confidence": "student_t_95",
         "run_ids": sorted(observation.run_id for observation in observations),
     }
     return CampaignSummary(
@@ -211,6 +245,38 @@ def _completed_values(aggregate: StrategyAggregate) -> list[float]:
         if observation.status is RunStatus.COMPLETED
         and observation.metric_value is not None
     ]
+
+
+def _completed_by_seed(aggregate: StrategyAggregate) -> dict[int, float]:
+    return {
+        observation.seed: observation.metric_value
+        for observation in aggregate.observations
+        if observation.status is RunStatus.COMPLETED
+        and observation.metric_value is not None
+    }
+
+
+def _aggregate_curves(items: tuple[RunObservation, ...]) -> tuple[CurveAggregatePoint, ...]:
+    curves = [item.curve for item in items if item.status is RunStatus.COMPLETED and item.curve]
+    if not curves:
+        return ()
+    grid = tuple((step, tokens) for step, tokens, _ in curves[0])
+    if any(tuple((step, tokens) for step, tokens, _ in curve) != grid for curve in curves):
+        raise ValueError("campaign validation curves must share the same coordinate grid")
+    aggregate = []
+    for index, (step, tokens) in enumerate(grid):
+        values = [curve[index][2] for curve in curves]
+        aggregate.append(
+            CurveAggregatePoint(
+                step=step,
+                training_tokens=tokens,
+                observations=len(values),
+                mean=statistics.fmean(values),
+                stdev=statistics.stdev(values) if len(values) > 1 else None,
+                confidence_interval=student_t_interval(values),
+            )
+        )
+    return tuple(aggregate)
 
 
 def _run_contract(manifest: RunManifest) -> str:
@@ -260,6 +326,17 @@ def render_campaign_report(
             f"<td>{html.escape(verdict)}</td>"
             "</tr>"
         )
+    curve_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(aggregate.strategy)}</td>"
+        f"<td>{point.step}</td>"
+        f"<td>{point.training_tokens}</td>"
+        f"<td>{_format_number(point.mean)}</td>"
+        f"<td>{_format_interval(point.confidence_interval)}</td>"
+        "</tr>"
+        for aggregate in summary.aggregates
+        for point in aggregate.validation_curve
+    )
     payload = json.dumps(to_primitive(summary), ensure_ascii=True, sort_keys=True, indent=2)
     document = f"""<!doctype html>
 <html lang="en">
@@ -281,6 +358,9 @@ minimum relative effect: {summary.minimum_effect:.1%}.</p>
 <h2>Aggregate Results</h2>
 <table><thead><tr><th>Strategy</th><th>Completed</th><th>Mean</th><th>Stdev</th>
 <th>Effect vs baseline</th><th>Verdict</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+<h2>Validation Curves</h2>
+<table><thead><tr><th>Strategy</th><th>Step</th><th>Training tokens</th>
+<th>Mean</th><th>95% CI</th></tr></thead><tbody>{curve_rows}</tbody></table>
 <h2>Evidence</h2>
 <pre>{html.escape(payload)}</pre>
 </html>
@@ -295,3 +375,9 @@ def _format_number(value: float | None) -> str:
 
 def _format_percent(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.2%}"
+
+
+def _format_interval(interval: ConfidenceInterval | None) -> str:
+    if interval is None:
+        return "n/a"
+    return f"[{interval.lower:.6g}, {interval.upper:.6g}]"

@@ -11,7 +11,7 @@ from typing import Any
 
 from celiums_rezero.lab.serialization import content_hash
 
-RUNNERS = {"synthetic_v1", "continuous_byte_corpus_v1"}
+RUNNERS = {"synthetic_v1", "continuous_byte_corpus_v1", "continuous_byte_corpus_v2"}
 ID_PATTERN = re.compile(r"^[A-Z]-[0-9a-f]{12,16}$")
 
 
@@ -127,6 +127,32 @@ class Metric:
 
 
 @dataclass(frozen=True, slots=True)
+class MetricPoint:
+    step: int
+    training_tokens: int
+    value: float
+
+    def __post_init__(self) -> None:
+        if min(self.step, self.training_tokens) < 0 or not isfinite(self.value):
+            raise ValueError("metric curve point is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class MetricCurve:
+    name: str
+    unit: str
+    direction: str
+    points: tuple[MetricPoint, ...]
+
+    def __post_init__(self) -> None:
+        if not self.name or self.direction not in {"minimize", "maximize", "neutral"}:
+            raise ValueError("metric curve metadata is invalid")
+        coordinates = [(point.step, point.training_tokens) for point in self.points]
+        if coordinates != sorted(coordinates) or len(set(coordinates)) != len(coordinates):
+            raise ValueError("metric curve coordinates must be strictly increasing")
+
+
+@dataclass(frozen=True, slots=True)
 class RunManifest:
     hypothesis_id: str
     stage: RunStage
@@ -228,6 +254,7 @@ class RunResult:
     finished_at: str
     failure: str | None = None
     artifacts: tuple[str, ...] = ()
+    curves: tuple[MetricCurve, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

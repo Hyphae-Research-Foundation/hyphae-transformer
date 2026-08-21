@@ -6,7 +6,7 @@ import pytest
 
 from celiums_rezero.lab.budgets import BudgetExceeded, BudgetTracker
 from celiums_rezero.lab.campaign import render_campaign_report, summarize_campaign
-from celiums_rezero.lab.evaluator import compare_means
+from celiums_rezero.lab.evaluator import compare_means, compare_paired, student_t_interval
 from celiums_rezero.lab.registry import Registry
 from celiums_rezero.lab.report import render_run_report
 from celiums_rezero.lab.schemas import (
@@ -15,6 +15,8 @@ from celiums_rezero.lab.schemas import (
     MemoryEntry,
     MemoryRelation,
     Metric,
+    MetricCurve,
+    MetricPoint,
     RunManifest,
     RunResult,
     RunStage,
@@ -149,6 +151,32 @@ def test_objective_comparison_and_halving() -> None:
         [TrialScore("a", 0.5, 0.1), TrialScore("b", 0.4, 0.3)]
     )
     assert [score.name for score in survivors] == ["a"]
+
+
+def test_paired_comparison_reports_student_t_uncertainty() -> None:
+    interval = student_t_interval([0.1, 0.2, 0.3])
+    assert interval is not None
+    assert interval.lower == pytest.approx(-0.0484138, abs=1e-6)
+    assert interval.upper == pytest.approx(0.4484138, abs=1e-6)
+    comparison = compare_paired(
+        [5.0, 5.0, 5.0],
+        [4.0, 4.0, 4.0],
+        direction="minimize",
+        minimum_effect=0.1,
+    )
+    assert comparison.verdict is Verdict.POSITIVE
+    assert comparison.paired_count == 3
+    assert comparison.relative_effect_confidence_interval is not None
+
+
+def test_metric_curve_requires_monotonic_coordinates() -> None:
+    with pytest.raises(ValueError, match="strictly increasing"):
+        MetricCurve(
+            "validation_nll",
+            "nats",
+            "minimize",
+            (MetricPoint(2, 20, 1.0), MetricPoint(1, 10, 2.0)),
+        )
 
 
 def test_campaign_aggregates_equal_seed_runs_and_renders_report(tmp_path: Path) -> None:

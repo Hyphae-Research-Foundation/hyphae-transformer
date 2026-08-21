@@ -73,3 +73,12 @@ The canonical raw-byte enwiki8 pilot (`200` steps, three seeds) produced means o
 2.5233 for `crz_rms`, 2.5094 for `rezero_rms_shared`, and 2.5608 for `pre_rms`.
 Shared gates led this short rung, so `crz_rms` must not be promoted as uniquely
 superior without a longer direct ablation.
+
+## V0.2 Analysis Protocol
+
+The next campaign preregisters `rezero_rms_shared` against `pre_rms`. Corpus
+manifests are location-independent and bind a prepared data root only at execution.
+Validation NLL is sampled on a fixed step grid, tokens-to-threshold uses the first
+observed crossing without interpolation, and comparisons are paired by seed. Point
+effects are promoted only when their paired 95% Student-t confidence interval clears
+the minimum effect.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import torch
 
 from celiums_rezero.lab.registry import Registry
@@ -85,6 +86,32 @@ def test_corpus_training_reports_validation_and_test_metrics() -> None:
     assert summary.test_bits_per_token is not None
 
 
+def test_periodic_validation_records_curve_and_threshold() -> None:
+    tokens = torch.arange(128, dtype=torch.long) % model_config().vocab_size
+    summary = train_corpus(
+        ReZeroLM(model_config()),
+        tokens,
+        TrainConfig(
+            steps=5,
+            batch_size=2,
+            evaluation_batch_size=2,
+            validation_every_steps=2,
+            validation_nll_threshold=100.0,
+            device="cpu",
+        ),
+        validation_tokens=tokens[:25],
+    )
+    assert [point.step for point in summary.validation_curve] == [2, 4, 5]
+    assert [point.training_tokens for point in summary.validation_curve] == [32, 64, 80]
+    assert summary.validation_nll == summary.validation_curve[-1].nll
+    assert summary.tokens_to_threshold == 32
+
+
+def test_validation_threshold_requires_cadence() -> None:
+    with pytest.raises(ValueError, match="requires validation_every_steps"):
+        TrainConfig(validation_nll_threshold=2.0)
+
+
 def test_lab_runner_writes_complete_evidence(tmp_path: Path) -> None:
     registry = Registry(tmp_path)
     budget = Budget(max_wall_seconds=60, max_failures=0)
@@ -154,6 +181,7 @@ def test_lab_runner_records_corpus_metrics(tmp_path: Path) -> None:
         config=staged_corpus_config(
             model=model_config(),
             training=training,
+            data_root=data,
             train_path=paths[0],
             validation_path=paths[1],
             test_path=paths[2],
@@ -161,10 +189,16 @@ def test_lab_runner_records_corpus_metrics(tmp_path: Path) -> None:
         budget=budget,
         data_revision="fixture-v1",
     )
-    result = run_registered_corpus(registry, manifest)
+    result = run_registered_corpus(registry, manifest, data_root=data)
     metric_names = {metric.name for metric in result.metrics}
     assert result.status is RunStatus.COMPLETED
     assert {"validation_nll", "test_nll"} <= metric_names
+    assert manifest.config["data"]["paths"] == {
+        "train": "train.txt",
+        "validation": "valid.txt",
+        "test": "test.txt",
+    }
+    assert str(data.resolve()) not in json.dumps(manifest.config)
 
 
 def test_checkpoint_resume_matches_uninterrupted_training(tmp_path: Path) -> None:
@@ -190,6 +224,34 @@ def test_checkpoint_resume_matches_uninterrupted_training(tmp_path: Path) -> Non
         uninterrupted.parameters(), interrupted.parameters(), strict=True
     ):
         torch.testing.assert_close(resumed_parameter, expected_parameter)
+    assert manager.history_path.read_text().count("\n") == 4
+
+
+def test_checkpoint_reconciles_uncommitted_history_tail(tmp_path: Path) -> None:
+    config = model_config()
+    torch.manual_seed(23)
+    uninterrupted = ReZeroLM(config)
+    resumed_model = ReZeroLM(config)
+    resumed_model.load_state_dict(uninterrupted.state_dict())
+    expected = train_synthetic(
+        uninterrupted,
+        TrainConfig(steps=4, batch_size=2, seed=11, device="cpu"),
+    )
+
+    manager = CheckpointManager(tmp_path / "checkpoint", every_steps=2)
+    train_synthetic(
+        resumed_model,
+        TrainConfig(steps=2, batch_size=2, seed=11, device="cpu"),
+        checkpoint_manager=manager,
+    )
+    with manager.history_path.open("a") as history:
+        history.write('{"step": 3}\n')
+    resumed = train_synthetic(
+        resumed_model,
+        TrainConfig(steps=4, batch_size=2, seed=11, device="cpu"),
+        checkpoint_manager=manager,
+    )
+    assert resumed.final_loss == expected.final_loss
     assert manager.history_path.read_text().count("\n") == 4
 
 
@@ -252,3 +314,67 @@ def test_runner_stops_when_wall_budget_expires(tmp_path: Path) -> None:
     result = run_manifest(registry, manifest)
     assert result.status is RunStatus.STOPPED
     assert result.failure is not None and "TimeoutError" in result.failure
+
+
+def test_portable_corpus_manifest_has_stable_identity_across_roots(tmp_path: Path) -> None:
+    roots = [tmp_path / "first", tmp_path / "second"]
+    configs = []
+    training = TrainConfig(steps=1, batch_size=1, seed=4)
+    for root in roots:
+        root.mkdir()
+        paths = [root / name for name in ("train", "validation", "test")]
+        for path in paths:
+            path.write_bytes(bytes(range(32)))
+        configs.append(
+            staged_corpus_config(
+                model=model_config(),
+                training=training,
+                data_root=root,
+                train_path=paths[0],
+                validation_path=paths[1],
+                test_path=paths[2],
+            )
+        )
+    assert configs[0] == configs[1]
+    budget = Budget(max_wall_seconds=60)
+    manifests = [
+        RunManifest(
+            hypothesis_id="H-0123456789ab",
+            stage=RunStage.PILOT,
+            seed=4,
+            config=config,
+            budget=budget,
+        )
+        for config in configs
+    ]
+    assert manifests[0].run_id == manifests[1].run_id
+
+
+def test_missing_data_binding_is_retryable(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    paths = [data / name for name in ("train", "validation", "test")]
+    for path in paths:
+        path.write_bytes(bytes(range(32)))
+    training = TrainConfig(steps=1, batch_size=1, seed=4)
+    manifest = RunManifest(
+        hypothesis_id="H-0123456789ab",
+        stage=RunStage.PILOT,
+        seed=4,
+        config=staged_corpus_config(
+            model=model_config(),
+            training=training,
+            data_root=data,
+            train_path=paths[0],
+            validation_path=paths[1],
+            test_path=paths[2],
+        ),
+        budget=Budget(max_wall_seconds=60),
+    )
+    registry = Registry(tmp_path / "registry")
+    with pytest.raises(ValueError, match="execution-time data root"):
+        run_registered_corpus(registry, manifest)
+    assert manifest.run_id is not None
+    assert registry.run_result(manifest.run_id) is None
+    result = run_registered_corpus(registry, manifest, data_root=data)
+    assert result.status is RunStatus.COMPLETED

@@ -68,39 +68,40 @@ def evaluate_corpus(
 
     was_training = model.training
     model.eval()
-    device = next(model.parameters()).device
-    sequence_length = model.config.max_sequence_length
-    transition_count = tokens.numel() - 1
-    full_window_count = transition_count // sequence_length
-    total_nll = 0.0
-    evaluated_tokens = 0
+    try:
+        device = next(model.parameters()).device
+        sequence_length = model.config.max_sequence_length
+        transition_count = tokens.numel() - 1
+        full_window_count = transition_count // sequence_length
+        total_nll = 0.0
+        evaluated_tokens = 0
 
-    if full_window_count:
-        end = full_window_count * sequence_length + 1
-        windows = tokens[:end].unfold(0, sequence_length + 1, sequence_length)
-        for start in range(0, full_window_count, batch_size):
+        if full_window_count:
+            end = full_window_count * sequence_length + 1
+            windows = tokens[:end].unfold(0, sequence_length + 1, sequence_length)
+            for start in range(0, full_window_count, batch_size):
+                if deadline is not None and time.perf_counter() >= deadline:
+                    raise TimeoutError("evaluation wall-time budget exceeded")
+                batch = windows[start : start + batch_size].long().to(device)
+                output = model(batch[:, :-1], batch[:, 1:])
+                if output.loss is None:
+                    raise RuntimeError("evaluation forward did not return a loss")
+                count = batch[:, :-1].numel()
+                total_nll += float(output.loss) * count
+                evaluated_tokens += count
+
+        remainder = transition_count - evaluated_tokens
+        if remainder:
             if deadline is not None and time.perf_counter() >= deadline:
                 raise TimeoutError("evaluation wall-time budget exceeded")
-            batch = windows[start : start + batch_size].long().to(device)
+            batch = tokens[evaluated_tokens:].unsqueeze(0).long().to(device)
             output = model(batch[:, :-1], batch[:, 1:])
             if output.loss is None:
                 raise RuntimeError("evaluation forward did not return a loss")
-            count = batch[:, :-1].numel()
-            total_nll += float(output.loss) * count
-            evaluated_tokens += count
-
-    remainder = transition_count - evaluated_tokens
-    if remainder:
-        if deadline is not None and time.perf_counter() >= deadline:
-            raise TimeoutError("evaluation wall-time budget exceeded")
-        batch = tokens[evaluated_tokens:].unsqueeze(0).long().to(device)
-        output = model(batch[:, :-1], batch[:, 1:])
-        if output.loss is None:
-            raise RuntimeError("evaluation forward did not return a loss")
-        total_nll += float(output.loss) * remainder
-        evaluated_tokens += remainder
-
-    model.train(was_training)
+            total_nll += float(output.loss) * remainder
+            evaluated_tokens += remainder
+    finally:
+        model.train(was_training)
     mean_nll = total_nll / evaluated_tokens
     return CorpusEvaluation(
         nll=mean_nll,
