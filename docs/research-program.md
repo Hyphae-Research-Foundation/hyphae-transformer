@@ -199,3 +199,17 @@ Across 24 and 48 layers, shared-gate ReZero consistently reaches the 1.8-NLL tar
 confidence threshold. Local feasibility is established; a cloud scale-up is now
 scientifically defensible only if it targets a larger parameter or sequence-length
 rung rather than repeating the same depth condition.
+
+### Preregistered 30M Cloud Rung
+
+The first cloud rung scales width to 512 with 12 layers, producing approximately
+31.6M parameters while preserving 1,024,000 training tokens per condition-seed run.
+It uses sequence length 256, batch size 8, validation every 50 steps, and seeds 7, 17,
+and 29. Before provisioning, both strategies must pass a local exact-shape 10-step
+CUDA gate below 7.5 GB peak memory.
+
+If promoted, all six runs execute sequentially on one ephemeral RTX 4000 Ada 20 GB
+Droplet in `tor1`. The hard lifetime is three hours and the maximum infrastructure
+cost is $2.28 at the recorded $0.76/hour rate. The Droplet must be destroyed after
+artifact retrieval on both success and failure paths. Interim effects do not authorize
+optional stopping.
