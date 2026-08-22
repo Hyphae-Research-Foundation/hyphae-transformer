@@ -1,5 +1,12 @@
 """Typed contracts for evidence-grounded knowledge acquisition."""
 
+from celiums_rezero.knowledge.acquisition import (
+    AcquisitionOutcome,
+    AcquisitionWorker,
+    ChunkingPolicy,
+    InMemoryKnowledgeIndex,
+    InMemorySourceConnector,
+)
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
 from celiums_rezero.knowledge.retrieval import (
     HyphaeRetrievalGateway,
@@ -21,10 +28,15 @@ from celiums_rezero.knowledge.store import InMemoryTenantStore
 
 __all__ = [
     "AcquisitionJob",
+    "AcquisitionOutcome",
     "AcquisitionPolicy",
+    "AcquisitionWorker",
+    "ChunkingPolicy",
     "EvidenceBundle",
     "EvidenceHit",
     "HyphaeRetrievalGateway",
+    "InMemoryKnowledgeIndex",
+    "InMemorySourceConnector",
     "InMemoryTenantStore",
     "JobStatus",
     "KnowledgeCoordinator",
