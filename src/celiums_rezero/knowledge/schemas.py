@@ -97,6 +97,7 @@ class EvidenceBundle:
     query_digest: str
     corpus_generation: str
     hits: tuple[EvidenceHit, ...]
+    snapshot_fingerprint: str | None = None
     approximate: bool = False
     conflicting: bool = False
     blocked: bool = False
@@ -109,6 +110,10 @@ class EvidenceBundle:
         handles = [hit.handle for hit in self.hits]
         if len(handles) != len(set(handles)):
             raise ValueError("evidence handles must be unique")
+        if self.snapshot_fingerprint is not None and not re.fullmatch(
+            r"[0-9a-f]{64}", self.snapshot_fingerprint
+        ):
+            raise ValueError("snapshot fingerprint must be lowercase SHA-256")
 
 
 @dataclass(frozen=True, slots=True)
