@@ -239,3 +239,13 @@ This first parameter-scale rung shows a larger point estimate but insufficient
 precision. It does not authorize a larger 60M cloud rung. The next efficient action is
 to improve artifact upload/runner automation and decide whether additional 30M seeds
 are worth preregistering under a new budget.
+
+### Preregistered 30M Eight-Seed Extension
+
+The initial cloud point estimate is extended to eight total seeds by adding seeds 41,
+53, 67, 79, and 97 under the identical 30M configuration. Ten new runs execute on a
+single RTX 4000 Ada Droplet through the fail-safe executor. The hard lifetime is two
+hours and the extension cost ceiling is $1.52 at $0.76/hour. All new runs must execute
+unless the declared failure or cloud budget is exceeded; interim effects do not
+authorize stopping. The combined analysis reuses the original three seeds and remains
+paired by seed.
