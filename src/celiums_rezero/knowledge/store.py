@@ -71,7 +71,12 @@ _ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     JobStatus.EMBEDDING: frozenset({JobStatus.INGESTING, JobStatus.FAILED}),
     JobStatus.INGESTING: frozenset({JobStatus.VERIFYING, JobStatus.FAILED}),
     JobStatus.VERIFYING: frozenset(
-        {JobStatus.READY, JobStatus.INSUFFICIENT_AFTER_INGEST, JobStatus.FAILED}
+        {
+            JobStatus.READY,
+            JobStatus.SHADOW_VALIDATED,
+            JobStatus.INSUFFICIENT_AFTER_INGEST,
+            JobStatus.FAILED,
+        }
     ),
     JobStatus.READY: frozenset({JobStatus.ANSWERING, JobStatus.FAILED}),
     JobStatus.ANSWERING: frozenset(

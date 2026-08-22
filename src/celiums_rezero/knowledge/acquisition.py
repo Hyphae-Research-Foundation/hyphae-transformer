@@ -139,6 +139,11 @@ class AcquisitionWorker:
             self.coordinator.store.transition(tenant, job_id, JobStatus.VERIFYING)
             if not self.verifier.verify(receipt, embedded):
                 raise AcquisitionError("ingested evidence failed deterministic verification")
+            if not receipt.published:
+                validated = self.coordinator.store.transition(
+                    tenant, job_id, JobStatus.SHADOW_VALIDATED
+                )
+                return AcquisitionOutcome(validated, artifact.content_digest, receipt)
             ready = self.coordinator.store.transition(tenant, job_id, JobStatus.READY)
             return AcquisitionOutcome(ready, artifact.content_digest, receipt)
         except Exception as error:
@@ -292,6 +297,7 @@ class InMemoryKnowledgeIndex:
                 chunk_ids=existing.chunk_ids,
                 idempotency_key=existing.idempotency_key,
                 replayed=True,
+                published=existing.published,
             )
         if not chunks:
             raise AcquisitionError("ingest requires at least one embedded chunk")
@@ -316,6 +322,7 @@ class InMemoryKnowledgeIndex:
             chunk_ids=tuple(item.chunk.chunk_id for item in chunks),
             idempotency_key=idempotency_key,
             replayed=False,
+            published=True,
         )
         self._receipts[key] = receipt
         return receipt
