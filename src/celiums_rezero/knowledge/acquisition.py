@@ -10,16 +10,25 @@ from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
 from celiums_rezero.knowledge.schemas import (
     AcquisitionJob,
     EmbeddedChunk,
+    IngestMode,
     IngestReceipt,
     JobStatus,
     KnowledgeChunk,
+    PublicationAuthorization,
+    PublicationTarget,
     SourceArtifact,
     TenantId,
+    ValidatedArtifact,
 )
+from celiums_rezero.lab.serialization import canonical_json
 
 
 class AcquisitionError(RuntimeError):
     """Acquisition could not complete under the declared policy."""
+
+
+class SecurityRejection(AcquisitionError):
+    """Untrusted source content failed a mandatory publication control."""
 
 
 class SourceConnector(Protocol):
@@ -34,6 +43,12 @@ class ChunkEmbedder(Protocol):
 
 
 class KnowledgeIngestor(Protocol):
+    @property
+    def mode(self) -> IngestMode: ...
+
+    @property
+    def target(self) -> PublicationTarget | None: ...
+
     def ingest(
         self,
         tenant: TenantId,
@@ -41,11 +56,28 @@ class KnowledgeIngestor(Protocol):
         *,
         corpus_generation: str,
         idempotency_key: str,
+        authorization: PublicationAuthorization | None = None,
     ) -> IngestReceipt: ...
 
 
 class IngestVerifier(Protocol):
     def verify(self, receipt: IngestReceipt, expected: tuple[EmbeddedChunk, ...]) -> bool: ...
+
+
+class ArtifactValidator(Protocol):
+    def validate(self, artifact: SourceArtifact) -> ValidatedArtifact: ...
+
+
+class PublicationAuthorizer(Protocol):
+    def authorize(
+        self,
+        *,
+        job: AcquisitionJob,
+        validated: ValidatedArtifact,
+        chunks: tuple[EmbeddedChunk, ...],
+        idempotency_key: str,
+        target: PublicationTarget,
+    ) -> PublicationAuthorization: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +114,8 @@ class AcquisitionWorker:
         ingestor: KnowledgeIngestor,
         verifier: IngestVerifier,
         chunking: ChunkingPolicy | None = None,
+        validator: ArtifactValidator | None = None,
+        authorizer: PublicationAuthorizer | None = None,
     ) -> None:
         self.coordinator = coordinator
         self.connector = connector
@@ -89,6 +123,8 @@ class AcquisitionWorker:
         self.ingestor = ingestor
         self.verifier = verifier
         self.chunking = ChunkingPolicy() if chunking is None else chunking
+        self.validator = validator
+        self.authorizer = authorizer
 
     def run(self, tenant: TenantId, job_id: str) -> AcquisitionOutcome:
         job = self.coordinator.job_status(tenant, job_id)
@@ -104,6 +140,14 @@ class AcquisitionWorker:
             return AcquisitionOutcome(denied, "")
         self.coordinator.store.transition(tenant, job_id, JobStatus.ACQUIRING)
         try:
+            mode = self.ingestor.mode
+            target = self.ingestor.target
+            if not isinstance(mode, IngestMode):
+                raise AcquisitionError("ingestor mode is not a typed contract value")
+            if mode is IngestMode.LIVE and target is None:
+                raise AcquisitionError("live ingestor has no publication target")
+            if mode is not IngestMode.LIVE and target is not None:
+                raise AcquisitionError("non-live ingestor exposed a publication target")
             artifact = self.connector.acquire(tenant, job.source_id, job.query)
             if artifact.tenant != tenant or artifact.source_id != job.source_id:
                 raise AcquisitionError("source connector crossed its tenant or source binding")
@@ -121,29 +165,60 @@ class AcquisitionWorker:
                     failure=f"license is not allowed: {artifact.license_id}",
                 )
                 return AcquisitionOutcome(terminal, artifact.content_digest)
+            validated = (
+                _unvalidated_text_artifact(artifact)
+                if self.validator is None
+                else self.validator.validate(artifact)
+            )
             self.coordinator.store.transition(tenant, job_id, JobStatus.CHUNKING)
-            chunks = chunk_artifact(artifact, self.chunking)
+            chunks = chunk_validated_artifact(validated, self.chunking)
             self.coordinator.store.transition(tenant, job_id, JobStatus.EMBEDDING)
             embedded = tuple(
                 EmbeddedChunk(chunk, self.embedder.profile, self.embedder.embed(chunk.text))
                 for chunk in chunks
             )
             self.coordinator.store.transition(tenant, job_id, JobStatus.INGESTING)
-            idempotency_key = ingest_idempotency_key(job, embedded, self.embedder.profile)
+            idempotency_key = ingest_idempotency_key(
+                job, embedded, self.embedder.profile, target=target
+            )
+            authorization = None
+            if mode is IngestMode.LIVE:
+                if self.validator is None or self.authorizer is None or target is None:
+                    raise AcquisitionError(
+                        "live publication requires validation and durable authorization"
+                    )
+                authorization = self.authorizer.authorize(
+                    job=job,
+                    validated=validated,
+                    chunks=embedded,
+                    idempotency_key=idempotency_key,
+                    target=target,
+                )
             receipt = self.ingestor.ingest(
                 tenant,
                 embedded,
                 corpus_generation=job.corpus_generation,
                 idempotency_key=idempotency_key,
+                authorization=authorization,
             )
+            if not isinstance(receipt, IngestReceipt):
+                raise AcquisitionError("ingestor did not return a typed receipt")
             self.coordinator.store.transition(tenant, job_id, JobStatus.VERIFYING)
             if not self.verifier.verify(receipt, embedded):
                 raise AcquisitionError("ingested evidence failed deterministic verification")
+            if receipt.mode is not mode:
+                raise AcquisitionError("ingest receipt mode does not match its ingestor")
+            if mode is IngestMode.LIVE and (
+                authorization is None
+                or receipt.authorization_id != authorization.authorization_id
+                or receipt.target != target
+            ):
+                raise AcquisitionError("live ingest receipt is not bound to its authorization")
             if not receipt.published:
-                validated = self.coordinator.store.transition(
+                shadow_validated = self.coordinator.store.transition(
                     tenant, job_id, JobStatus.SHADOW_VALIDATED
                 )
-                return AcquisitionOutcome(validated, artifact.content_digest, receipt)
+                return AcquisitionOutcome(shadow_validated, artifact.content_digest, receipt)
             ready = self.coordinator.store.transition(tenant, job_id, JobStatus.READY)
             return AcquisitionOutcome(ready, artifact.content_digest, receipt)
         except Exception as error:
@@ -151,10 +226,17 @@ class AcquisitionWorker:
             assert current is not None
             if current.status.terminal:
                 return AcquisitionOutcome(current, "")
+            status = (
+                JobStatus.SECURITY_REJECTED
+                if current.status
+                in {JobStatus.ACQUIRING, JobStatus.QUARANTINED, JobStatus.VALIDATING}
+                and isinstance(error, SecurityRejection)
+                else JobStatus.FAILED
+            )
             failed = self.coordinator.store.transition(
                 tenant,
                 job_id,
-                JobStatus.FAILED,
+                status,
                 failure=f"{type(error).__name__}: {error}",
             )
             return AcquisitionOutcome(failed, "")
@@ -187,9 +269,15 @@ class AcquisitionWorker:
 def chunk_artifact(
     artifact: SourceArtifact, policy: ChunkingPolicy
 ) -> tuple[KnowledgeChunk, ...]:
-    text = artifact.body.decode("utf-8", errors="strict")
+    return chunk_validated_artifact(_unvalidated_text_artifact(artifact), policy)
+
+
+def chunk_validated_artifact(
+    validated: ValidatedArtifact, policy: ChunkingPolicy
+) -> tuple[KnowledgeChunk, ...]:
+    artifact = validated.artifact
+    text = validated.body.decode("utf-8", errors="strict")
     encoded = text.encode()
-    step = policy.max_chunk_bytes - policy.overlap_bytes
     chunks: list[KnowledgeChunk] = []
     start = 0
     ordinal = 0
@@ -208,7 +296,7 @@ def chunk_artifact(
         digest = hashlib.sha256(piece.encode()).hexdigest()
         identity = hashlib.sha256(
             b"knowledge-chunk-v1\0"
-            + artifact.content_digest.encode()
+            + validated.content_digest.encode()
             + start.to_bytes(8, "big")
             + end.to_bytes(8, "big")
         ).hexdigest()[:16]
@@ -226,9 +314,20 @@ def chunk_artifact(
         )
         if end == len(encoded):
             break
-        start = _utf8_boundary(encoded, start + step)
+        start = _utf8_boundary(encoded, max(end - policy.overlap_bytes, start + 1))
         ordinal += 1
     return tuple(chunks)
+
+
+def _unvalidated_text_artifact(artifact: SourceArtifact) -> ValidatedArtifact:
+    return ValidatedArtifact(
+        artifact=artifact,
+        body=artifact.body,
+        content_digest=artifact.content_digest,
+        parser="legacy-strict-utf8",
+        parser_version="1",
+        scans=(),
+    )
 
 
 def _utf8_boundary(encoded: bytes, target: int) -> int:
@@ -242,19 +341,41 @@ def ingest_idempotency_key(
     job: AcquisitionJob,
     chunks: tuple[EmbeddedChunk, ...],
     embedding_profile: str,
+    *,
+    target: PublicationTarget | None = None,
 ) -> str:
-    digest = hashlib.sha256()
-    digest.update(b"knowledge-ingest-v1\0")
-    digest.update(job.tenant.value.encode())
-    digest.update(job.source_id.encode())
-    digest.update(job.corpus_generation.encode())
-    digest.update(embedding_profile.encode())
-    for item in chunks:
-        digest.update(item.chunk.chunk_id.encode())
-        digest.update(item.chunk.content_digest.encode())
-        for value in item.values:
-            digest.update(float(value).hex().encode())
-    return digest.hexdigest()
+    identity = {
+        "schema": "knowledge-ingest-v2",
+        "tenant": job.tenant.value,
+        "source_id": job.source_id,
+        "corpus_generation": job.corpus_generation,
+        "embedding_profile": embedding_profile,
+        "target": target,
+        "chunks": [
+            {
+                "chunk_id": item.chunk.chunk_id,
+                "content_digest": item.chunk.content_digest,
+                "values": [float(value).hex() for value in item.values],
+            }
+            for item in chunks
+        ],
+    }
+    return hashlib.sha256(canonical_json(identity).encode()).hexdigest()
+
+
+def validate_embedded_chunks(
+    job: AcquisitionJob,
+    chunks: tuple[EmbeddedChunk, ...],
+    embedding_profile: str,
+    idempotency_key: str,
+    *,
+    target: PublicationTarget | None,
+) -> None:
+    observed = ingest_idempotency_key(
+        job, chunks, embedding_profile, target=target
+    )
+    if observed != idempotency_key:
+        raise AcquisitionError("embedded chunks do not match their ingest idempotency key")
 
 
 class InMemorySourceConnector:
@@ -278,6 +399,14 @@ class InMemoryKnowledgeIndex:
         self._receipts: dict[tuple[str, str], IngestReceipt] = {}
         self._chunks: dict[str, dict[str, EmbeddedChunk]] = {}
 
+    @property
+    def mode(self) -> IngestMode:
+        return IngestMode.SIMULATED
+
+    @property
+    def target(self) -> PublicationTarget | None:
+        return None
+
     def ingest(
         self,
         tenant: TenantId,
@@ -285,7 +414,9 @@ class InMemoryKnowledgeIndex:
         *,
         corpus_generation: str,
         idempotency_key: str,
+        authorization: PublicationAuthorization | None = None,
     ) -> IngestReceipt:
+        del authorization
         key = (tenant.value, idempotency_key)
         existing = self._receipts.get(key)
         if existing is not None:
@@ -298,6 +429,11 @@ class InMemoryKnowledgeIndex:
                 idempotency_key=existing.idempotency_key,
                 replayed=True,
                 published=existing.published,
+                mode=existing.mode,
+                target=existing.target,
+                authorization_id=existing.authorization_id,
+                backend_receipt_digest=existing.backend_receipt_digest,
+                backend_receipt_json=existing.backend_receipt_json,
             )
         if not chunks:
             raise AcquisitionError("ingest requires at least one embedded chunk")
@@ -323,6 +459,7 @@ class InMemoryKnowledgeIndex:
             idempotency_key=idempotency_key,
             replayed=False,
             published=True,
+            mode=IngestMode.SIMULATED,
         )
         self._receipts[key] = receipt
         return receipt

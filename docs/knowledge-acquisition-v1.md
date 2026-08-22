@@ -134,8 +134,69 @@ are validated, receipted, and verified without calling Hyphae, and the job termi
 as `shadow_validated`. `publish=True` is an explicit integration opt-in and remains
 appropriate only for controlled tests until the full live-publication gate closes.
 
-Phase 3 does not yet include DNS pinning through an egress proxy, redirect support,
-content decompression, archive or rich-document parsing, malware/PII/secret scanning,
-license discovery, durable job leases, transaction outbox, corpus-generation cutover,
-rollback, or external receipt signatures. Automatic production publication stays
-disabled until those controls and a live tenant-isolated Hyphae conformance run pass.
+## Live Publication Gate
+
+Live publication now requires all of these host-owned controls in addition to
+`publish=True`:
+
+- `StrictArtifactValidator` accepts only bounded strict UTF-8 `text/plain`. HTML, PDF,
+  archives, executable formats, malformed UTF-8, NUL-bearing text, and expanded output
+  above the configured bound fail closed because no sandboxed parser exists for them.
+- Mandatory versioned scanners run over raw or parsed bytes for the EICAR malware test
+  signature, common PII, common secret formats, and explicit prompt-injection patterns.
+  A finding or scanner exception terminates the job as `security_rejected` before
+  embedding or ingestion. These deterministic rules are a narrow gate, not a claim of
+  comprehensive commercial malware or DLP coverage.
+- `DurablePublicationAuthorizer(enabled=True)` creates a content-addressed immutable
+  authorization bound to tenant, source, policy, raw and parsed digests, parser and
+  scanner versions, chunk IDs and digests, embedding profile, corpus generation, and
+  ingest idempotency key.
+- `PublicationReceiptStore` writes authorization and ingest receipts as canonical,
+  bounded, owner-only files using same-directory temporary files, file `fsync`,
+  create-if-absent links, and parent-directory `fsync`. Recovery validates exact
+  schemas, duplicate JSON keys, path binding, typed fields, and content-derived IDs.
+- `HyphaeShadowIngestor` refuses live construction without a durable store, refuses
+  publication without a matching stored authorization, rejects mixed-source batches
+  and idempotency conflicts, and binds replay to an operator-supplied immutable backend
+  identity, collection, and vector target. It accepts only the exact `search_ingested`
+  receipt contract with complete snapshot, document-count, idempotency, strict commit,
+  WAL digest, and durability-cohort evidence. The canonical backend receipt and its
+  digest are persisted before the job becomes `ready`.
+
+`publish=False` remains the default and requires no publication authority. Production
+automation remains disabled until deployment supplies an approved scanner backend,
+durable job leases/outbox, atomic corpus-generation cutover and rollback, deletion
+propagation, external audit anchoring, and rate/cost controls. Redirects, compressed
+content, archive parsing, HTML, and PDF remain intentionally unsupported rather than
+silently under-scanned.
+
+The durable receipt store closes local replay after a completed write, but does not
+make the in-memory job queue crash-recoverable. A process failure between Hyphae commit
+and local receipt publication requires rerunning the same deterministic ingest against
+the same backend, which Hyphae will suppress by idempotency and return with the original
+commit evidence. Production automation therefore remains blocked until a durable queue
+can recover an `ingesting` job and reconstruct the exact authorized batch.
+
+## Isolated Hyphae Conformance
+
+Run `scripts/hyphae_knowledge_conformance.py` with the Hyphae 1.2.2 Python SDK on
+`PYTHONPATH` and an already provisioned, tenant-isolated native endpoint:
+
+```text
+PYTHONPATH=/path/to/hyphae/sdks/python/src:src \
+  python scripts/hyphae_knowledge_conformance.py \
+  --endpoint /tmp/tenant-a/hyphae.sock \
+  --api-key-file /tmp/tenant-a/owner.key \
+  --collection 13 --receipts /tmp/tenant-a/receipts \
+  --backend-id <sha256-of-persistent-hyphae-directory-lineage>
+```
+
+The collection must declare the `body`, `source_id`, `source_version`,
+`content_digest`, `corpus_generation`, `byte_start`, `byte_end`, and `chunk_ordinal`
+doc values and an exact two-dimensional vector named `semantic`. The script exercises
+the real publication gate, persists strict Hyphae receipt evidence, restarts the
+receipt store, executes integrated lexical/vector/filter retrieval, and verifies the
+hydrated body digest. The endpoint and receipt directory must both be dedicated to the
+same tenant; the script never initializes or mutates another tenant's data directory.
+`--backend-id` must be derived from the persistent Hyphae directory lineage, not its
+socket path, so recreating a backend cannot inherit local replay authority.

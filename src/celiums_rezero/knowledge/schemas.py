@@ -72,6 +72,12 @@ class JobStatus(StrEnum):
         }
 
 
+class IngestMode(StrEnum):
+    SIMULATED = "simulated"
+    SHADOW = "shadow"
+    LIVE = "live"
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceHit:
     handle: str
@@ -281,6 +287,44 @@ class SourceArtifact:
 
 
 @dataclass(frozen=True, slots=True)
+class SecurityScanReceipt:
+    scanner: str
+    version: str
+    target: str
+    content_digest: str
+    findings: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.scanner or not self.version or self.target not in {"raw", "parsed"}:
+            raise ValueError("security scan identity is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.content_digest):
+            raise ValueError("security scan digest must be lowercase SHA-256")
+        if self.findings < 0:
+            raise ValueError("security scan finding count cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedArtifact:
+    artifact: SourceArtifact
+    body: bytes
+    content_digest: str
+    parser: str
+    parser_version: str
+    scans: tuple[SecurityScanReceipt, ...]
+
+    def __post_init__(self) -> None:
+        if not self.body or not self.parser or not self.parser_version:
+            raise ValueError("validated artifact parser and body are required")
+        if self.content_digest != hashlib.sha256(self.body).hexdigest():
+            raise ValueError("validated artifact digest does not match its bytes")
+        scanner_names = [scan.scanner for scan in self.scans]
+        if len(scanner_names) != len(set(scanner_names)):
+            raise ValueError("validated artifact scanners must be unique")
+        if any(scan.findings for scan in self.scans):
+            raise ValueError("validated artifact cannot contain security findings")
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeChunk:
     chunk_id: str
     source_id: str
@@ -314,6 +358,117 @@ class EmbeddedChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationTarget:
+    backend_id: str
+    collection: int
+    vector_target: str
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", self.backend_id):
+            raise ValueError("publication backend ID must be lowercase SHA-256")
+        if self.collection < 1 or not self.vector_target or len(self.vector_target) > 128:
+            raise ValueError("publication target is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationAuthorization:
+    tenant: TenantId
+    source_id: str
+    source_version: str
+    corpus_generation: str
+    policy_version: str
+    raw_digest: str
+    parsed_digest: str
+    parser: str
+    parser_version: str
+    scans: tuple[SecurityScanReceipt, ...]
+    chunk_ids: tuple[str, ...]
+    chunk_digests: tuple[str, ...]
+    chunk_coordinates: tuple[tuple[int, int, int], ...]
+    embedding_profile: str
+    idempotency_key: str
+    authority: str
+    target: PublicationTarget
+    embedding_digests: tuple[str, ...]
+    authorization_id: str | None = None
+
+    def __post_init__(self) -> None:
+        required = (
+            self.source_id,
+            self.source_version,
+            self.corpus_generation,
+            self.policy_version,
+            self.parser,
+            self.parser_version,
+            self.embedding_profile,
+            self.authority,
+        )
+        if any(not value for value in required):
+            raise ValueError("publication authorization identity is incomplete")
+        digests = (self.raw_digest, self.parsed_digest, self.idempotency_key)
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in digests):
+            raise ValueError("publication authorization digests must be lowercase SHA-256")
+        if not self.chunk_ids or len(self.chunk_ids) != len(set(self.chunk_ids)):
+            raise ValueError("publication authorization requires unique chunks")
+        if len(self.chunk_ids) != len(self.chunk_digests) or any(
+            not re.fullmatch(r"[0-9a-f]{64}", digest) for digest in self.chunk_digests
+        ):
+            raise ValueError("publication authorization chunk digests are invalid")
+        if len(self.chunk_ids) != len(self.chunk_coordinates) or any(
+            ordinal != index or not 0 <= start < end
+            for index, (ordinal, start, end) in enumerate(self.chunk_coordinates)
+        ):
+            raise ValueError("publication authorization chunk coordinates are invalid")
+        if len(self.chunk_ids) != len(self.embedding_digests) or any(
+            not re.fullmatch(r"[0-9a-f]{64}", digest) for digest in self.embedding_digests
+        ):
+            raise ValueError("publication authorization embedding digests are invalid")
+        if not self.scans or any(scan.findings for scan in self.scans):
+            raise ValueError("publication authorization requires clean security scans")
+        scanner_targets = {scan.scanner: scan.target for scan in self.scans}
+        required_scanners = {
+            "malware": "raw",
+            "pii": "parsed",
+            "secrets": "parsed",
+            "prompt-injection": "parsed",
+        }
+        if scanner_targets != required_scanners:
+            raise ValueError("publication authorization is missing mandatory security scans")
+        if any(
+            scan.content_digest
+            != (self.raw_digest if scan.target == "raw" else self.parsed_digest)
+            for scan in self.scans
+        ):
+            raise ValueError("publication authorization scan digests do not match the content")
+        identity = {
+            "schema": "knowledge-publication-authorization-v1",
+            "tenant": self.tenant.value,
+            "source_id": self.source_id,
+            "source_version": self.source_version,
+            "corpus_generation": self.corpus_generation,
+            "policy_version": self.policy_version,
+            "raw_digest": self.raw_digest,
+            "parsed_digest": self.parsed_digest,
+            "parser": self.parser,
+            "parser_version": self.parser_version,
+            "scans": self.scans,
+            "chunk_ids": self.chunk_ids,
+            "chunk_digests": self.chunk_digests,
+            "chunk_coordinates": self.chunk_coordinates,
+            "embedding_profile": self.embedding_profile,
+            "idempotency_key": self.idempotency_key,
+            "authority": self.authority,
+            "target": self.target,
+            "embedding_digests": self.embedding_digests,
+        }
+        expected = f"authorization_{content_hash(identity, length=64)}"
+        if self.authorization_id is None:
+            object.__setattr__(self, "authorization_id", expected)
+        elif self.authorization_id != expected:
+            raise ValueError("publication authorization ID does not match its contents")
+
+
+@dataclass(frozen=True, slots=True)
 class IngestReceipt:
     tenant: TenantId
     source_id: str
@@ -322,15 +477,55 @@ class IngestReceipt:
     chunk_ids: tuple[str, ...]
     idempotency_key: str
     replayed: bool
-    published: bool = True
+    published: bool = False
+    mode: IngestMode = IngestMode.SHADOW
+    target: PublicationTarget | None = None
+    authorization_id: str | None = None
+    backend_receipt_digest: str | None = None
+    backend_receipt_json: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.mode, IngestMode):
+            raise ValueError("ingest receipt mode must be typed")
+        if not isinstance(self.replayed, bool) or not isinstance(self.published, bool):
+            raise ValueError("ingest receipt flags must be booleans")
         if not self.source_id or not self.source_version or not self.corpus_generation:
             raise ValueError("ingest receipt source and generation are required")
         if not self.chunk_ids or len(self.chunk_ids) != len(set(self.chunk_ids)):
             raise ValueError("ingest receipt requires unique chunks")
         if not re.fullmatch(r"[0-9a-f]{64}", self.idempotency_key):
             raise ValueError("ingest idempotency key must be lowercase SHA-256")
+        if self.backend_receipt_digest is not None and not re.fullmatch(
+            r"[0-9a-f]{64}", self.backend_receipt_digest
+        ):
+            raise ValueError("backend receipt digest must be lowercase SHA-256")
+        if self.authorization_id is not None and not re.fullmatch(
+            r"authorization_[0-9a-f]{64}", self.authorization_id
+        ):
+            raise ValueError("publication authorization ID is invalid")
+        if self.mode is IngestMode.LIVE:
+            if not self.published or any(
+                value is None
+                for value in (
+                    self.target,
+                    self.authorization_id,
+                    self.backend_receipt_digest,
+                    self.backend_receipt_json,
+                )
+            ):
+                raise ValueError("live ingest receipt evidence must be complete")
+            assert self.backend_receipt_json is not None
+            if len(self.backend_receipt_json.encode()) > 1_000_000:
+                raise ValueError("backend ingest receipt exceeds its byte bound")
+        elif self.authorization_id is not None or any(
+            value is not None
+            for value in (self.target, self.backend_receipt_digest, self.backend_receipt_json)
+        ):
+            raise ValueError("non-live ingest receipt cannot carry live publication evidence")
+        if self.mode is IngestMode.SHADOW and self.published:
+            raise ValueError("shadow ingest receipt cannot be published")
+        if self.mode is IngestMode.SIMULATED and not self.published:
+            raise ValueError("simulated ingest receipt must represent stored fixture evidence")
 
 
 @dataclass(frozen=True, slots=True)
