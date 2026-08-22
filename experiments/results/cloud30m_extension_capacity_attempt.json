@@ -1,0 +1,11 @@
+{
+  "attempted_at": "2026-08-22T00:30:01Z",
+  "campaign": "rezero_rms_shared_vs_pre_rms_cloud30m_8seed_extension",
+  "cost_usd": 0.0,
+  "droplet_created": false,
+  "error": "Size is not available in this region.",
+  "region": "tor1",
+  "requested_size": "gpu-4000adax1-20gb",
+  "resources_remaining": 0,
+  "status": "blocked_no_capacity"
+}
