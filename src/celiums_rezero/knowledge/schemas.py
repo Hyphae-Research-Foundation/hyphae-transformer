@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass, field
@@ -253,6 +254,77 @@ class KnowledgeResponse:
     job_id: str | None = None
     deduplicated: bool = False
     evidence_handles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SourceArtifact:
+    tenant: TenantId
+    source_id: str
+    source_version: str
+    body: bytes
+    content_type: str
+    license_id: str
+    content_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.source_id or not self.source_version or not self.body:
+            raise ValueError("source artifact identity and body are required")
+        if not self.content_type or not self.license_id:
+            raise ValueError("source artifact type and license are required")
+        if self.content_digest != hashlib.sha256(self.body).hexdigest():
+            raise ValueError("source artifact digest does not match its bytes")
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeChunk:
+    chunk_id: str
+    source_id: str
+    source_version: str
+    ordinal: int
+    byte_start: int
+    byte_end: int
+    text: str
+    content_digest: str
+
+    def __post_init__(self) -> None:
+        if not HANDLE_PATTERN.fullmatch(self.chunk_id) or not self.text:
+            raise ValueError("knowledge chunk identity and text are required")
+        if self.ordinal < 0 or not 0 <= self.byte_start < self.byte_end:
+            raise ValueError("knowledge chunk coordinates are invalid")
+        if self.content_digest != hashlib.sha256(self.text.encode()).hexdigest():
+            raise ValueError("knowledge chunk digest does not match its text")
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddedChunk:
+    chunk: KnowledgeChunk
+    embedding_profile: str
+    values: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if not self.embedding_profile or not self.values:
+            raise ValueError("embedding profile and values are required")
+        if any(not isfinite(value) for value in self.values):
+            raise ValueError("embedding values must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class IngestReceipt:
+    tenant: TenantId
+    source_id: str
+    source_version: str
+    corpus_generation: str
+    chunk_ids: tuple[str, ...]
+    idempotency_key: str
+    replayed: bool
+
+    def __post_init__(self) -> None:
+        if not self.source_id or not self.source_version or not self.corpus_generation:
+            raise ValueError("ingest receipt source and generation are required")
+        if not self.chunk_ids or len(self.chunk_ids) != len(set(self.chunk_ids)):
+            raise ValueError("ingest receipt requires unique chunks")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.idempotency_key):
+            raise ValueError("ingest idempotency key must be lowercase SHA-256")
 
 
 def _host_is_forbidden(host: str) -> bool:

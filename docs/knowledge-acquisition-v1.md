@@ -96,3 +96,24 @@ DNS-rebinding and metadata-service denial, redirect revalidation, compressed and
 expanded byte limits, parser sandboxing, malware/PII/secret/license gates,
 cross-tenant denial, idempotent crash recovery, rollback, deletion propagation,
 external audit anchoring, and strict rate/cost quotas.
+
+## Phase 2 Simulator
+
+Phase 2 executes the complete asynchronous lifecycle without a network fetcher or a
+Hyphae writer. A tenant-bound `InMemorySourceConnector` returns only artifacts that
+were provisioned explicitly by the test host. The worker verifies tenant/source
+binding, byte budget, MIME policy, artifact SHA-256, and license policy before
+deterministic UTF-8 chunking.
+
+Each chunk is content-addressed by source digest and byte range, embedded by a pinned
+provider interface, and written to an idempotent tenant-local simulated index. The
+worker verifies every stored chunk before transitioning to `ready`; verification
+failure is terminal. Finalization transitions through `answering` and `notifying`, or
+ends as `insufficient_after_ingest` without recursively creating another job.
+
+The simulator proves lifecycle ordering, tenant isolation, deterministic overlap,
+source/license/MIME/size rejection, idempotent replay, and failure handling. It does
+not claim sandboxing, malware scanning, network security, durable queue semantics,
+Hyphae commit receipts, embedding attestation, or production notification delivery.
+Those are required before replacing the in-memory source and index with live Phase 3
+components.
