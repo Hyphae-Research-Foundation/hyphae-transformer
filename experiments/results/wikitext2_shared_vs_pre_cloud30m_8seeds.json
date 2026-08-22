@@ -1,0 +1,82 @@
+{
+  "analysis": {
+    "metric": "validation_nll",
+    "minimum_effect": 0.01,
+    "paired_relative_effect": 0.0232550048224793,
+    "paired_relative_effect_95_ci": [
+      0.015861042684683118,
+      0.030648966960275477
+    ],
+    "verdict": "positive"
+  },
+  "campaigns": {
+    "extension_l40s": "C-724f10c154426e16",
+    "initial_rtx4000_ada": "C-509ea6ec16570235"
+  },
+  "cloud_extension": {
+    "accelerator": "nvidia_l40s_48gb",
+    "created_at": "2026-08-22T00:53:58.666470Z",
+    "deleted_and_verified_absent": true,
+    "deleted_at": "2026-08-22T02:54:59.307233Z",
+    "droplet_id": 594196356,
+    "estimated_cost_usd": 3.166446110530556,
+    "hourly_rate_usd": 1.57,
+    "lifetime_seconds": 7260.640763,
+    "maximum_cost_usd": 3.14,
+    "protocol_status": "cost_budget_exceeded",
+    "run_completion": "10_of_10_complete"
+  },
+  "conditions": {
+    "batch_size": 8,
+    "d_model": 512,
+    "layers": 12,
+    "seeds": [7, 17, 29, 41, 53, 67, 79, 97],
+    "sequence_length": 256,
+    "steps": 500,
+    "training_tokens_per_run": 1024000
+  },
+  "pre_rms": {
+    "mean_validation_nll": 1.5388965427180819,
+    "mean_validation_nll_95_ci": [
+      1.528547200193968,
+      1.5492458852421958
+    ],
+    "mean_tokens_per_second": 3692.8253392875185,
+    "peak_memory_bytes": 1336510464,
+    "tokens_to_1_8_nll": [
+      512000,
+      512000,
+      512000,
+      512000,
+      512000,
+      512000,
+      512000,
+      512000
+    ]
+  },
+  "rezero_rms_shared": {
+    "mean_validation_nll": 1.5031094961958762,
+    "mean_validation_nll_95_ci": [
+      1.4921163372220205,
+      1.5141026551697319
+    ],
+    "mean_tokens_per_second": 3728.783090519716,
+    "peak_memory_bytes": 1437192192,
+    "tokens_to_1_8_nll": [
+      512000,
+      409600,
+      409600,
+      409600,
+      409600,
+      409600,
+      409600,
+      409600
+    ]
+  },
+  "threshold_analysis": {
+    "nll_threshold": 1.8,
+    "paired_relative_effect": 0.175,
+    "paired_relative_effect_95_ci": [0.1158843937, 0.2341156063],
+    "verdict": "positive"
+  }
+}

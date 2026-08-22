@@ -145,7 +145,7 @@ def execute_digitalocean_campaign(
         command_runner.run(_ssh_command(plan, public_ip, _bootstrap_script(plan)), timeout=900)
         command_runner.run(
             _ssh_command(plan, public_ip, _campaign_script(plan)),
-            timeout=plan.max_lifetime_seconds,
+            timeout=plan.max_lifetime_seconds + 300,
         )
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
         command_runner.run(_rsync_command(plan, public_ip), timeout=900)
@@ -175,6 +175,13 @@ def execute_digitalocean_campaign(
             )
 
     lifetime = 0.0 if created_at is None else (deleted_at - created_at).total_seconds()
+    estimated_cost = lifetime * plan.hourly_rate_usd / 3600
+    if estimated_cost > plan.max_cost_usd and failure is None:
+        status = "failed"
+        failure = (
+            f"BudgetExceeded: estimated cloud cost {estimated_cost:.6f} "
+            f"exceeds {plan.max_cost_usd:.6f}"
+        )
     summary = CloudExecutionSummary(
         status=status,
         droplet_id=droplet_id,
@@ -183,7 +190,7 @@ def execute_digitalocean_campaign(
         created_at=None if created_at is None else created_at.isoformat(),
         deleted_at=deleted_at.isoformat(),
         lifetime_seconds=lifetime,
-        estimated_cost_usd=lifetime * plan.hourly_rate_usd / 3600,
+        estimated_cost_usd=estimated_cost,
         artifact_directory=str(plan.artifact_directory),
         failure=failure,
     )
