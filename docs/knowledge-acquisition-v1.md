@@ -117,3 +117,25 @@ not claim sandboxing, malware scanning, network security, durable queue semantic
 Hyphae commit receipts, embedding attestation, or production notification delivery.
 Those are required before replacing the in-memory source and index with live Phase 3
 components.
+
+## Phase 3 Shadow Mode
+
+Phase 3 adds a real HTTPS connector and a bounded Hyphae ingestion adapter, but keeps
+publication disabled by default. Source URLs remain immutable policy fields; neither
+the model nor a user query can provide or redirect them. The connector enforces HTTPS,
+declared host/path, public-only DNS answers, pinned-IP connection with hostname TLS,
+peer-IP matching, disabled redirects, response byte bounds, exact MIME allowlists,
+artifact SHA-256, and source license metadata.
+
+The `HyphaeShadowIngestor` builds canonical `search_ingest` documents containing the
+temporary body hydration fields, source/version/digest, corpus generation, byte
+ranges, ordinal, and named embedding vector. `publish=False` is the default: batches
+are validated, receipted, and verified without calling Hyphae, and the job terminates
+as `shadow_validated`. `publish=True` is an explicit integration opt-in and remains
+appropriate only for controlled tests until the full live-publication gate closes.
+
+Phase 3 does not yet include DNS pinning through an egress proxy, redirect support,
+content decompression, archive or rich-document parsing, malware/PII/secret scanning,
+license discovery, durable job leases, transaction outbox, corpus-generation cutover,
+rollback, or external receipt signatures. Automatic production publication stays
+disabled until those controls and a live tenant-isolated Hyphae conformance run pass.

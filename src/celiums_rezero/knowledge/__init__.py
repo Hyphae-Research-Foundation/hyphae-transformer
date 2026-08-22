@@ -8,6 +8,12 @@ from celiums_rezero.knowledge.acquisition import (
     InMemorySourceConnector,
 )
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
+from celiums_rezero.knowledge.live import (
+    FetchResponse,
+    HttpsFetchPolicy,
+    HttpsSourceConnector,
+    HyphaeShadowIngestor,
+)
 from celiums_rezero.knowledge.retrieval import (
     HyphaeRetrievalGateway,
     RetrievalConfig,
@@ -34,7 +40,11 @@ __all__ = [
     "ChunkingPolicy",
     "EvidenceBundle",
     "EvidenceHit",
+    "FetchResponse",
+    "HttpsFetchPolicy",
+    "HttpsSourceConnector",
     "HyphaeRetrievalGateway",
+    "HyphaeShadowIngestor",
     "InMemoryKnowledgeIndex",
     "InMemorySourceConnector",
     "InMemoryTenantStore",

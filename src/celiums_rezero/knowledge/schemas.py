@@ -50,6 +50,7 @@ class JobStatus(StrEnum):
     ANSWERING = "answering"
     NOTIFYING = "notifying"
     COMPLETED = "completed"
+    SHADOW_VALIDATED = "shadow_validated"
     POLICY_DENIED = "policy_denied"
     LICENSE_UNKNOWN = "license_unknown"
     SECURITY_REJECTED = "security_rejected"
@@ -61,6 +62,7 @@ class JobStatus(StrEnum):
     def terminal(self) -> bool:
         return self in {
             JobStatus.COMPLETED,
+            JobStatus.SHADOW_VALIDATED,
             JobStatus.POLICY_DENIED,
             JobStatus.LICENSE_UNKNOWN,
             JobStatus.SECURITY_REJECTED,
@@ -155,6 +157,7 @@ class SufficiencyPolicy:
 class SourcePolicy:
     source_id: str
     allowed_hosts: tuple[str, ...]
+    resource_url: str | None = None
     allowed_path_prefixes: tuple[str, ...] = ("/",)
     allowed_mime_types: tuple[str, ...] = ("text/plain", "text/html", "application/pdf")
     allowed_license_ids: tuple[str, ...] = ()
@@ -175,6 +178,8 @@ class SourcePolicy:
         if self.max_download_bytes < 1 or not 0 <= self.max_redirects <= 5:
             raise ValueError("source download limits are invalid")
         object.__setattr__(self, "allowed_hosts", hosts)
+        if self.resource_url is not None and not self.permits_url(self.resource_url):
+            raise ValueError("source resource URL is not permitted by its own policy")
 
     def permits_url(self, url: str) -> bool:
         parsed = urlparse(url)
@@ -317,6 +322,7 @@ class IngestReceipt:
     chunk_ids: tuple[str, ...]
     idempotency_key: str
     replayed: bool
+    published: bool = True
 
     def __post_init__(self) -> None:
         if not self.source_id or not self.source_version or not self.corpus_generation:
@@ -325,6 +331,32 @@ class IngestReceipt:
             raise ValueError("ingest receipt requires unique chunks")
         if not re.fullmatch(r"[0-9a-f]{64}", self.idempotency_key):
             raise ValueError("ingest idempotency key must be lowercase SHA-256")
+
+
+@dataclass(frozen=True, slots=True)
+class AcquisitionReceipt:
+    tenant: TenantId
+    source_id: str
+    source_version: str
+    source_url: str
+    policy_version: str
+    content_type: str
+    license_id: str
+    raw_bytes: int
+    raw_digest: str
+    chunk_ids: tuple[str, ...]
+    embedding_profile: str
+    ingest_idempotency_key: str
+    published: bool
+
+    def __post_init__(self) -> None:
+        if not self.source_url.startswith("https://") or self.raw_bytes < 1:
+            raise ValueError("acquisition source URL and byte count are invalid")
+        digests = (self.raw_digest, self.ingest_idempotency_key)
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in digests):
+            raise ValueError("acquisition receipt digests must be lowercase SHA-256")
+        if not self.chunk_ids or not self.embedding_profile:
+            raise ValueError("acquisition receipt chunks and embedding profile are required")
 
 
 def _host_is_forbidden(host: str) -> bool:
