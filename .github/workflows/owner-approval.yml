@@ -1,0 +1,40 @@
+name: Owner Approval
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  owner-approval:
+    name: owner-approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require current owner approval for external pull requests
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OWNER: terrizoaguimor
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "${AUTHOR}" = "${OWNER}" ]; then
+            exit 0
+          fi
+          review="$(gh api "repos/${REPOSITORY}/pulls/${PULL_REQUEST}/reviews" \
+            --paginate \
+            --jq '[.[] | select(.user.login == env.OWNER)]
+              | sort_by(.submitted_at)
+              | last
+              | [(.state // "NONE"), (.commit_id // "")]
+              | @tsv')"
+          state="${review%%$'\t'*}"
+          commit="${review#*$'\t'}"
+          test "${state}" = "APPROVED"
+          test "${commit}" = "${HEAD_SHA}"
