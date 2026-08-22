@@ -1,0 +1,24 @@
+{
+  "artifact_directory": "artifacts/cloud-campaign",
+  "campaign_command": [
+    "pilot-wikitext2",
+    "--device",
+    "cuda",
+    "--steps",
+    "500",
+    "--batch-size",
+    "8"
+  ],
+  "data_command": ["prepare-data", "wikitext2"],
+  "hourly_rate_usd": 0.76,
+  "image": "gpu-h100x1-base",
+  "max_cost_usd": 2.28,
+  "max_lifetime_seconds": 10800,
+  "name": "celiums-rezero-example",
+  "region": "tor1",
+  "repository_url": "https://github.com/celiumsai/celiums-rezero.git",
+  "revision": "replace-with-full-commit-sha",
+  "size": "gpu-4000adax1-20gb",
+  "ssh_key_id": "replace-with-digitalocean-key-id",
+  "ssh_private_key": "/absolute/path/to/private/key"
+}

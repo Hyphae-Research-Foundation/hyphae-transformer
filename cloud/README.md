@@ -61,3 +61,30 @@ For a DigitalOcean worker, mount the prepared corpus root read-only and bind it 
 Persist the registry directory to Spaces or another durable volume.
 The worker must enforce its own hard process timeout in addition to the in-loop
 manifest wall-time budget. Provisioning remains an explicit promotion action.
+
+## Fail-Safe Campaign Executor
+
+`cloud-digitalocean` provisions exactly one allowlisted GPU Droplet, waits for SSH,
+checks out an immutable Git revision, prepares the public corpus, executes one
+allowlisted campaign, retrieves reports while excluding large checkpoints, and
+deletes the Droplet in a `finally` path. A failed campaign still attempts artifact
+retrieval and resource deletion.
+
+Plans are JSON and must declare an immutable revision, hourly rate, hard lifetime,
+maximum cost, SSH key, output path, data command, and campaign command. Verify the
+full lifecycle without provisioning:
+
+```bash
+uv run celiums-rezero cloud-digitalocean cloud/plan.json --dry-run
+```
+
+Then execute only after the dry-run and preregistration are reviewed:
+
+```bash
+uv run celiums-rezero cloud-digitalocean cloud/plan.json
+```
+
+The executor writes `cloud-execution.json` beside the retrieved evidence with the
+Droplet ID, timestamps, estimated cost, status, and failure detail. `doctl` billing
+and Droplet inventory remain the external authority; verify the Droplet is absent
+after every invocation.
