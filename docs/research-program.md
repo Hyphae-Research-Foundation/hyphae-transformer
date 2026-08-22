@@ -263,3 +263,19 @@ The hard lifetime remains two hours and the amended cost ceiling is $3.14. Model
 data, seeds, optimizer, token budget, validation schedule, analysis, stopping rule,
 and cleanup requirements are unchanged. The equal-price RTX 6000 Ada alternative is
 excluded prospectively to prevent post-result accelerator selection.
+
+### 30M Eight-Seed Extension Result
+
+All ten amended L40S runs completed and their reports were retrieved. The executor's
+local SSH wait reached the two-hour boundary just as the remote command completed, so
+the lifecycle summary is marked failed and the estimated cost was $3.17, approximately
+$0.03 above the $3.14 ceiling. The Droplet was nevertheless deleted through the
+finally path and verified absent. Scientific observations are complete, but the cloud
+budget outcome is a protocol violation and is reported separately.
+
+Combining the original RTX 4000 Ada seeds with the preregistered L40S extension,
+`rezero_rms_shared` reached mean final validation NLL 1.5031 versus 1.5389 for
+`pre_rms`. The paired improvement was +2.33%, with a 95% interval of
+[+1.59%, +3.06%], clearing the +1% practical threshold. The primary verdict is
+**positive**. The 1.8-NLL token reduction was +17.5%, with a 95% interval of
+[+11.59%, +23.41%], also positive.

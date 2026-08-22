@@ -120,3 +120,15 @@ def test_cloud_executor_preserves_create_failure_detail_without_delete(tmp_path:
         command[:4] == ["doctl", "compute", "droplet", "delete"]
         for command in runner.commands
     )
+
+
+def test_campaign_timeout_allows_cleanup_grace(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    cloud_plan = plan(tmp_path)
+    execute_digitalocean_campaign(cloud_plan, runner=runner, sleep=lambda _: None)
+    campaign_calls = [
+        command
+        for command in runner.commands
+        if command[0] == "ssh" and "timeout --signal" in command[-1]
+    ]
+    assert campaign_calls
