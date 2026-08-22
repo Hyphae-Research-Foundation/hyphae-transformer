@@ -65,12 +65,29 @@ and contract gate, not a production downloader or Hyphae writer.
 
 ## Phase 1 Integration
 
-The first live integration uses tenant-local Hyphae hybrid search and a temporary
-bounded `body` field because integrated hits currently return object IDs, scores, and
-doc values but not the exact document body. The preferred Hyphae addition is a typed
-`SearchDocumentGetMany` operation. Native abstention results, ingest provenance,
-public snapshot pins, and atomic corpus-generation publication remain follow-up
-engine work.
+Phase 1 now includes a read-only `HyphaeRetrievalGateway` over the smallest public
+Python SDK subset: `search_collection`. It is bound to one tenant, one collection, one
+corpus generation, and an optional pinned caller-owned embedding provider. Requests
+combine a lexical branch and an exact named-vector query when configured, and insert
+an active-generation filter before ranking.
+
+Integrated hits currently return object IDs, scores, and doc values but not the exact
+document body. Until Hyphae publishes `SearchDocumentGetMany`, ingestion must place a
+bounded body, source ID, source version, content digest, and corpus generation in
+declared doc-value fields. The gateway rejects missing fields, body/digest mismatches,
+cross-generation hits, malformed snapshots, unexpected response kinds, non-finite
+vectors, and cross-tenant calls.
+
+The complete Hyphae snapshot identity is reduced to a stable SHA-256 fingerprint and
+stored with every evidence bundle. This binds evidence to the returned retrieval root
+but does not create a long-lived read view or prove the result. Public read views,
+native abstention results, document-body reads, ingest provenance, snapshot pins, and
+atomic corpus-generation publication remain follow-up engine work.
+
+The sufficiency gate remains authoritative outside Gemma. A supported evidence bundle
+returns opaque handles for generation; below-threshold or absent evidence creates one
+deduplicated asynchronous acquisition job. Conflicts, blocked authority, malformed
+Hyphae results, and approximate retrieval under an exact-only policy fail closed.
 
 ## Security Gate Before Network Acquisition
 

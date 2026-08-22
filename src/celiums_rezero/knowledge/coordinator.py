@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from typing import Protocol
 
 from celiums_rezero.knowledge.schemas import (
     NO_KNOWLEDGE_MESSAGE,
@@ -17,6 +18,10 @@ from celiums_rezero.knowledge.schemas import (
     TenantId,
 )
 from celiums_rezero.knowledge.store import InMemoryTenantStore
+
+
+class KnowledgeRetriever(Protocol):
+    def retrieve(self, tenant: TenantId, query: str) -> EvidenceBundle: ...
 
 
 class KnowledgeCoordinator:
@@ -99,6 +104,22 @@ class KnowledgeCoordinator:
             decision=SufficiencyDecision.PENDING,
             job_id=queued.job_id,
             deduplicated=deduplicated,
+        )
+
+    def retrieve_or_enqueue(
+        self,
+        *,
+        tenant: TenantId,
+        query: str,
+        retriever: KnowledgeRetriever,
+        source_id: str,
+    ) -> KnowledgeResponse:
+        evidence = retriever.retrieve(tenant, query)
+        return self.answer_or_enqueue(
+            tenant=tenant,
+            query=query,
+            evidence=evidence,
+            source_id=source_id,
         )
 
     def job_status(self, tenant: TenantId, job_id: str) -> AcquisitionJob | None:
