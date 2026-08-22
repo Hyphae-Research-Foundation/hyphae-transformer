@@ -151,7 +151,10 @@ def execute_digitalocean_campaign(
         command_runner.run(_rsync_command(plan, public_ip), timeout=900)
         status = "completed"
     except Exception as error:
-        failure = f"{type(error).__name__}: {error}"
+        detail = ""
+        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+            detail = f": {error.stderr.strip()}"
+        failure = f"{type(error).__name__}: {error}{detail}"
         if public_ip is not None:
             try:
                 plan.artifact_directory.mkdir(parents=True, exist_ok=True)

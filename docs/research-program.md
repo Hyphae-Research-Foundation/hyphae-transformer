@@ -249,3 +249,8 @@ hours and the extension cost ceiling is $1.52 at $0.76/hour. All new runs must e
 unless the declared failure or cloud budget is exceeded; interim effects do not
 authorize stopping. The combined analysis reuses the original three seeds and remains
 paired by seed.
+
+The first extension launch attempt created no resource and spent $0 because
+DigitalOcean returned `Size is not available in this region` for the preregistered
+RTX 4000 Ada in `tor1`. No result data was produced. Any alternate accelerator or
+cost ceiling requires a prospective amendment before another launch.

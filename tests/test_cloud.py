@@ -43,9 +43,10 @@ def test_cloud_dry_run_has_no_side_effects(tmp_path: Path) -> None:
 
 
 class FakeRunner:
-    def __init__(self, *, fail_campaign: bool = False) -> None:
+    def __init__(self, *, fail_campaign: bool = False, fail_create: bool = False) -> None:
         self.commands: list[list[str]] = []
         self.fail_campaign = fail_campaign
+        self.fail_create = fail_create
 
     def run(
         self,
@@ -58,6 +59,12 @@ class FakeRunner:
         del capture_output, timeout
         self.commands.append(command)
         if command[:4] == ["doctl", "compute", "droplet", "create"]:
+            if self.fail_create:
+                raise subprocess.CalledProcessError(
+                    1,
+                    command,
+                    stderr="Size is not available in this region.",
+                )
             payload = [
                 {
                     "id": 42,
@@ -100,3 +107,16 @@ def test_cloud_executor_retrieves_and_deletes_after_failure(tmp_path: Path) -> N
     assert summary.failure is not None
     assert any(command[0] == "rsync" for command in runner.commands)
     assert runner.commands[-1][-2:] == ["42", "--force"]
+
+
+def test_cloud_executor_preserves_create_failure_detail_without_delete(tmp_path: Path) -> None:
+    runner = FakeRunner(fail_create=True)
+    summary = execute_digitalocean_campaign(plan(tmp_path), runner=runner)
+    assert summary.status == "failed"
+    assert summary.droplet_id is None
+    assert summary.estimated_cost_usd == 0
+    assert summary.failure is not None and "Size is not available" in summary.failure
+    assert not any(
+        command[:4] == ["doctl", "compute", "droplet", "delete"]
+        for command in runner.commands
+    )
