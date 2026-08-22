@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
 
 import pytest
 
 from celiums_rezero.knowledge import (
     AcquisitionPolicy,
     AcquisitionWorker,
+    DurablePublicationAuthorizer,
     EvidenceBundle,
     FetchResponse,
     HttpsSourceConnector,
@@ -15,12 +18,16 @@ from celiums_rezero.knowledge import (
     InMemoryTenantStore,
     JobStatus,
     KnowledgeCoordinator,
+    PublicationReceiptStore,
+    StrictArtifactValidator,
     SufficiencyPolicy,
     TenantId,
 )
-from celiums_rezero.knowledge.acquisition import ChunkingPolicy
+from celiums_rezero.knowledge.acquisition import ChunkingPolicy, chunk_validated_artifact
 from celiums_rezero.knowledge.coordinator import normalize_query
-from celiums_rezero.knowledge.schemas import SourcePolicy
+from celiums_rezero.knowledge.schemas import EmbeddedChunk, SourcePolicy
+
+BACKEND_ID = hashlib.sha256(bytes(range(24))).hexdigest()
 
 
 class FakeResolver:
@@ -61,7 +68,30 @@ class FakeHyphaeClient:
     ) -> FakeHyphaeResponse:
         assert options is None
         self.calls.append((collection, batch))
-        return FakeHyphaeResponse("search_ingested", {"idempotent_replay": False})
+        return FakeHyphaeResponse(
+            "search_ingested",
+            {
+                "idempotent_replay": False,
+                "documents": len(batch["documents"]),
+                "snapshot": {
+                    "directory_lineage": bytes(range(24)),
+                    "visible_csn": 7,
+                    "catalog_version": 3,
+                    "root_digest": bytes(range(32)),
+                    "logical_time_micros": 11,
+                },
+                "commit": {
+                    "durability": "strict",
+                    "transaction_id": 6,
+                    "commit_csn": 7,
+                    "catalog_version": 3,
+                    "commit_lsn": 8,
+                    "wal_block_digest": bytes(range(32)),
+                    "durability_cohort_size": 1,
+                    "durability_cohort_position": 0,
+                },
+            },
+        )
 
 
 class Embedder:
@@ -69,6 +99,20 @@ class Embedder:
 
     def embed(self, text: str) -> tuple[float, ...]:
         return (len(text) / 100, 0.5)
+
+
+class MalformedHyphaeClient(FakeHyphaeClient):
+    def search_ingest(
+        self,
+        collection: int,
+        batch: dict[str, object],
+        *,
+        options: object | None = None,
+    ) -> FakeHyphaeResponse:
+        super().search_ingest(collection, batch, options=options)
+        return FakeHyphaeResponse(
+            "search_ingested", {"commit": {"durability": "strict"}}
+        )
 
 
 def policy() -> SourcePolicy:
@@ -223,7 +267,74 @@ def test_shadow_worker_validates_without_publishing_to_hyphae() -> None:
     assert client.calls == []
 
 
-def test_live_publication_requires_explicit_opt_in_and_is_idempotent() -> None:
+def test_live_publication_requires_explicit_opt_in_and_is_idempotent(tmp_path: Path) -> None:
+    item, tenant, job_id = coordinator()
+    client = FakeHyphaeClient()
+    receipts = PublicationReceiptStore(tmp_path / "receipts")
+    ingestor = HyphaeShadowIngestor(
+        tenant=tenant,
+        client=client,
+        collection=41,
+        vector_target="semantic",
+        backend_id=BACKEND_ID,
+        publish=True,
+        receipt_store=receipts,
+    )
+    worker = AcquisitionWorker(
+        coordinator=item,
+        connector=connector(good_response()),
+        embedder=Embedder(),
+        ingestor=ingestor,
+        verifier=ingestor,
+        validator=StrictArtifactValidator(),
+        authorizer=DurablePublicationAuthorizer(
+            tenant=tenant,
+            store=receipts,
+            authority="fixture-operator",
+            enabled=True,
+        ),
+    )
+    outcome = worker.run(tenant, job_id)
+    assert outcome.job.status is JobStatus.READY
+    assert outcome.receipt is not None and outcome.receipt.published
+    assert outcome.receipt.authorization_id is not None
+    assert outcome.receipt.backend_receipt_digest is not None
+    assert len(client.calls) == 1
+    documents = client.calls[0][1]["documents"]
+    assert isinstance(documents, list)
+    assert documents[0]["doc_values"]["corpus_generation"] == "generation-v1"
+
+    recovered = HyphaeShadowIngestor(
+        tenant=tenant,
+        client=client,
+        collection=41,
+        vector_target="semantic",
+        backend_id=BACKEND_ID,
+        publish=True,
+        receipt_store=PublicationReceiptStore(tmp_path / "receipts"),
+    )
+    authorization = receipts.load_authorization(tenant, outcome.receipt.authorization_id)
+    assert authorization is not None
+    validated = StrictArtifactValidator().validate(
+        connector(good_response()).acquire(tenant, "official_docs", "ignored")
+    )
+    embedded = tuple(
+        EmbeddedChunk(chunk, Embedder.profile, Embedder().embed(chunk.text))
+        for chunk in chunk_validated_artifact(validated, ChunkingPolicy())
+    )
+    replay = recovered.ingest(
+        tenant,
+        embedded,
+        corpus_generation="generation-v1",
+        idempotency_key=outcome.receipt.idempotency_key,
+        authorization=authorization,
+    )
+    assert replay.replayed
+    assert recovered.verify(replay, embedded)
+    assert len(client.calls) == 1
+
+
+def test_live_publication_fails_closed_without_gate(tmp_path: Path) -> None:
     item, tenant, job_id = coordinator()
     client = FakeHyphaeClient()
     ingestor = HyphaeShadowIngestor(
@@ -231,7 +342,9 @@ def test_live_publication_requires_explicit_opt_in_and_is_idempotent() -> None:
         client=client,
         collection=41,
         vector_target="semantic",
+        backend_id=BACKEND_ID,
         publish=True,
+        receipt_store=PublicationReceiptStore(tmp_path / "receipts"),
     )
     worker = AcquisitionWorker(
         coordinator=item,
@@ -241,12 +354,118 @@ def test_live_publication_requires_explicit_opt_in_and_is_idempotent() -> None:
         verifier=ingestor,
     )
     outcome = worker.run(tenant, job_id)
-    assert outcome.job.status is JobStatus.READY
-    assert outcome.receipt is not None and outcome.receipt.published
-    assert len(client.calls) == 1
-    documents = client.calls[0][1]["documents"]
-    assert isinstance(documents, list)
-    assert documents[0]["doc_values"]["corpus_generation"] == "generation-v1"
+    assert outcome.job.status is JobStatus.FAILED
+    assert "requires validation and durable authorization" in (outcome.job.failure or "")
+    assert client.calls == []
+
+
+def test_live_ingestor_requires_durable_store() -> None:
+    with pytest.raises(ValueError, match="durable receipt store"):
+        HyphaeShadowIngestor(
+            tenant=TenantId("tenant_a"),
+            client=FakeHyphaeClient(),
+            collection=41,
+            vector_target="semantic",
+            publish=True,
+        )
+    with pytest.raises(ValueError, match="boolean"):
+        HyphaeShadowIngestor(
+            tenant=TenantId("tenant_a"),
+            client=FakeHyphaeClient(),
+            collection=41,
+            vector_target="semantic",
+            publish=cast(bool, "false"),
+        )
+
+
+def test_live_publication_rejects_malformed_backend_receipt(tmp_path: Path) -> None:
+    item, tenant, job_id = coordinator()
+    receipts = PublicationReceiptStore(tmp_path / "receipts")
+    client = MalformedHyphaeClient()
+    ingestor = HyphaeShadowIngestor(
+        tenant=tenant,
+        client=client,
+        collection=41,
+        vector_target="semantic",
+        backend_id=BACKEND_ID,
+        publish=True,
+        receipt_store=receipts,
+    )
+    worker = AcquisitionWorker(
+        coordinator=item,
+        connector=connector(good_response()),
+        embedder=Embedder(),
+        ingestor=ingestor,
+        verifier=ingestor,
+        validator=StrictArtifactValidator(),
+        authorizer=DurablePublicationAuthorizer(
+            tenant=tenant,
+            store=receipts,
+            authority="fixture-operator",
+            enabled=True,
+        ),
+    )
+    outcome = worker.run(tenant, job_id)
+    assert outcome.job.status is JobStatus.FAILED
+    assert "receipt fields are invalid" in (outcome.job.failure or "")
+    assert receipts.load_ingest(tenant, "0" * 64) is None
+
+
+def test_durable_replay_rejects_another_backend(tmp_path: Path) -> None:
+    item, tenant, job_id = coordinator()
+    client = FakeHyphaeClient()
+    receipts = PublicationReceiptStore(tmp_path / "receipts")
+    ingestor = HyphaeShadowIngestor(
+        tenant=tenant,
+        client=client,
+        collection=41,
+        vector_target="semantic",
+        backend_id=BACKEND_ID,
+        publish=True,
+        receipt_store=receipts,
+    )
+    worker = AcquisitionWorker(
+        coordinator=item,
+        connector=connector(good_response()),
+        embedder=Embedder(),
+        ingestor=ingestor,
+        verifier=ingestor,
+        validator=StrictArtifactValidator(),
+        authorizer=DurablePublicationAuthorizer(
+            tenant=tenant,
+            store=receipts,
+            authority="fixture-operator",
+            enabled=True,
+        ),
+    )
+    outcome = worker.run(tenant, job_id)
+    assert outcome.receipt is not None and outcome.receipt.authorization_id is not None
+    authorization = receipts.load_authorization(tenant, outcome.receipt.authorization_id)
+    assert authorization is not None
+    validated = StrictArtifactValidator().validate(
+        connector(good_response()).acquire(tenant, "official_docs", "ignored")
+    )
+    embedded = tuple(
+        EmbeddedChunk(chunk, Embedder.profile, Embedder().embed(chunk.text))
+        for chunk in chunk_validated_artifact(validated, ChunkingPolicy())
+    )
+    wrong_backend = HyphaeShadowIngestor(
+        tenant=tenant,
+        client=client,
+        collection=41,
+        vector_target="semantic",
+        backend_id="b" * 64,
+        publish=True,
+        receipt_store=receipts,
+    )
+    with pytest.raises(PermissionError, match="target"):
+        wrong_backend.ingest(
+            tenant,
+            embedded,
+            corpus_generation="generation-v1",
+            idempotency_key=outcome.receipt.idempotency_key,
+            authorization=authorization,
+        )
 
 
 def test_hyphae_ingestor_rejects_cross_tenant_and_batch_overflow() -> None:

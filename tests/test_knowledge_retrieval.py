@@ -111,9 +111,10 @@ def test_gateway_builds_hybrid_request_and_hydrates_verified_body() -> None:
     assert request["vectors"] == [
         {
             "target": "semantic",
-            "values": [0.25, 0.75],
+            "query": [0.25, 0.75],
             "candidate_limit": 32,
             "weight": 1,
+            "execution": {"kind": "exact"},
         }
     ]
 

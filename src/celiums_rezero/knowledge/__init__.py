@@ -6,6 +6,7 @@ from celiums_rezero.knowledge.acquisition import (
     ChunkingPolicy,
     InMemoryKnowledgeIndex,
     InMemorySourceConnector,
+    SecurityRejection,
 )
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
 from celiums_rezero.knowledge.live import (
@@ -13,6 +14,10 @@ from celiums_rezero.knowledge.live import (
     HttpsFetchPolicy,
     HttpsSourceConnector,
     HyphaeShadowIngestor,
+)
+from celiums_rezero.knowledge.publication import (
+    DurablePublicationAuthorizer,
+    PublicationReceiptStore,
 )
 from celiums_rezero.knowledge.retrieval import (
     HyphaeRetrievalGateway,
@@ -31,13 +36,19 @@ from celiums_rezero.knowledge.schemas import (
     TenantId,
 )
 from celiums_rezero.knowledge.store import InMemoryTenantStore
+from celiums_rezero.knowledge.validation import (
+    BoundedTextParser,
+    StrictArtifactValidator,
+)
 
 __all__ = [
     "AcquisitionJob",
     "AcquisitionOutcome",
     "AcquisitionPolicy",
     "AcquisitionWorker",
+    "BoundedTextParser",
     "ChunkingPolicy",
+    "DurablePublicationAuthorizer",
     "EvidenceBundle",
     "EvidenceHit",
     "FetchResponse",
@@ -51,8 +62,11 @@ __all__ = [
     "JobStatus",
     "KnowledgeCoordinator",
     "KnowledgeResponse",
+    "PublicationReceiptStore",
     "RetrievalConfig",
     "RetrievalContractError",
+    "SecurityRejection",
+    "StrictArtifactValidator",
     "SufficiencyDecision",
     "SufficiencyPolicy",
     "TenantId",
