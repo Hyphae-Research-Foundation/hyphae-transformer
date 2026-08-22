@@ -213,3 +213,29 @@ Droplet in `tor1`. The hard lifetime is three hours and the maximum infrastructu
 cost is $2.28 at the recorded $0.76/hour rate. The Droplet must be destroyed after
 artifact retrieval on both success and failure paths. Interim effects do not authorize
 optional stopping.
+
+### 30M Cloud Result
+
+The local exact-shape feasibility gate passed. Peak memory was 1.39 GB for
+`pre_rms` and 1.49 GB for `rezero_rms_shared`, both well below the 7.5 GB stop
+limit. The promoted campaign then completed all six runs on one ephemeral
+DigitalOcean RTX 4000 Ada 20 GB Droplet in `tor1` with no failed seeds.
+
+Final validation NLL was 1.4979 for `rezero_rms_shared` and 1.5324 for `pre_rms`.
+The paired relative improvement was +2.25%, with a 95% confidence interval of
+[-0.79%, +5.30%]. The interval crosses zero and the +1% practical minimum, so the
+primary verdict is **inconclusive**.
+
+For the 1.8-NLL threshold, `pre_rms` crossed at 512,000 tokens for all seeds, while
+shared-gate ReZero crossed at `(512k, 409.6k, 409.6k)`. The paired mean reduction was
+13.33%, with a wide 95% interval of [-15.35%, +42.02%], also inconclusive.
+
+The Droplet existed for approximately 0.786 hours at the recorded $0.76/hour rate,
+for an estimated infrastructure cost of $0.60 against the $2.28 maximum. Evidence
+was retrieved before deletion, and the Droplet was confirmed absent afterward. No
+Celiums ReZero cloud resource remains active.
+
+This first parameter-scale rung shows a larger point estimate but insufficient
+precision. It does not authorize a larger 60M cloud rung. The next efficient action is
+to improve artifact upload/runner automation and decide whether additional 30M seeds
+are worth preregistering under a new budget.
