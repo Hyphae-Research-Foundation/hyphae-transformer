@@ -115,9 +115,10 @@ class HyphaeRetrievalGateway:
             vectors.append(
                 {
                     "target": self.config.vector_target,
-                    "values": list(values),
+                    "query": list(values),
                     "candidate_limit": self.config.candidate_limit,
                     "weight": self.config.vector_weight,
+                    "execution": {"kind": "exact"},
                 }
             )
         return {
