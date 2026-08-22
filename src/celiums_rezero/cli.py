@@ -8,6 +8,7 @@ from pathlib import Path
 
 import torch
 
+from celiums_rezero.cloud.digitalocean import CloudCampaignPlan, execute_digitalocean_campaign
 from celiums_rezero.core.diagnostics import collect_gate_stats
 from celiums_rezero.data.bytes import ByteTokenizer
 from celiums_rezero.data.prepare import (
@@ -129,6 +130,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[item.value for item in ResidualStrategy],
         default=[item.value for item in ResidualStrategy],
     )
+
+    cloud = commands.add_parser(
+        "cloud-digitalocean",
+        help="execute an allowlisted campaign on one fail-safe GPU Droplet",
+    )
+    cloud.add_argument("plan", type=Path)
+    cloud.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -418,6 +426,31 @@ def command_pilot_enwiki8(arguments: argparse.Namespace) -> int:
     return 0 if all(result.failure is None for _, result in records) else 1
 
 
+def command_cloud_digitalocean(arguments: argparse.Namespace) -> int:
+    values = json.loads(arguments.plan.read_text())
+    if not isinstance(values, dict):
+        raise TypeError("cloud plan JSON must contain an object")
+    plan = CloudCampaignPlan(
+        name=str(values["name"]),
+        region=str(values["region"]),
+        size=str(values["size"]),
+        image=str(values["image"]),
+        ssh_key_id=str(values["ssh_key_id"]),
+        ssh_private_key=Path(str(values["ssh_private_key"])),
+        repository_url=str(values["repository_url"]),
+        revision=str(values["revision"]),
+        data_command=tuple(str(item) for item in values["data_command"]),
+        campaign_command=tuple(str(item) for item in values["campaign_command"]),
+        artifact_directory=Path(str(values["artifact_directory"])),
+        hourly_rate_usd=float(values["hourly_rate_usd"]),
+        max_lifetime_seconds=int(values["max_lifetime_seconds"]),
+        max_cost_usd=float(values["max_cost_usd"]),
+    )
+    summary = execute_digitalocean_campaign(plan, dry_run=arguments.dry_run)
+    print(json.dumps(to_primitive(summary), indent=2, sort_keys=True))
+    return 0 if summary.status in {"completed", "dry_run"} else 1
+
+
 def main() -> int:
     parser = build_parser()
     arguments = parser.parse_args()
@@ -428,6 +461,7 @@ def main() -> int:
         "run-manifest": command_run_manifest,
         "pilot-wikitext2": command_pilot_wikitext2,
         "pilot-enwiki8": command_pilot_enwiki8,
+        "cloud-digitalocean": command_cloud_digitalocean,
     }
     return commands[arguments.command](arguments)
 
