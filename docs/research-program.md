@@ -254,3 +254,12 @@ The first extension launch attempt created no resource and spent $0 because
 DigitalOcean returned `Size is not available in this region` for the preregistered
 RTX 4000 Ada in `tor1`. No result data was produced. Any alternate accelerator or
 cost ceiling requires a prospective amendment before another launch.
+
+### Prospective L40S Amendment
+
+The extension is amended before any new observation to use the first available
+equal-price 48 GB NVIDIA size returned by preflight: one L40S in `tor1` at $1.57/hour.
+The hard lifetime remains two hours and the amended cost ceiling is $3.14. Model,
+data, seeds, optimizer, token budget, validation schedule, analysis, stopping rule,
+and cleanup requirements are unchanged. The equal-price RTX 6000 Ada alternative is
+excluded prospectively to prevent post-result accelerator selection.

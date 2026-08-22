@@ -1,0 +1,50 @@
+{
+  "amends": "rezero_rms_shared_vs_pre_rms_cloud30m_8seed_extension",
+  "amendment_reason": "DigitalOcean returned `Size is not available in this region` before creating the preregistered RTX 4000 Ada Droplet. The attempt cost $0 and produced no experimental observations.",
+  "analysis_unchanged": {
+    "confidence_interval": "paired_student_t_95",
+    "minimum_effect": 0.01,
+    "primary_metric": "validation_nll",
+    "secondary_metric": "tokens_to_1_8_nll",
+    "verdict_rule": "positive only when the paired relative-effect 95% confidence interval lower bound is at least 0.01"
+  },
+  "approved_cloud_substitution": {
+    "accelerator": "nvidia_l40s_48gb",
+    "availability_checked_at": "2026-08-22T00:45:00Z",
+    "droplet_image": "gpu-h100x1-base",
+    "droplet_size": "gpu-l40sx1-48gb",
+    "hard_lifetime_hours": 2,
+    "hourly_rate_usd": 1.57,
+    "maximum_extension_cost_usd": 3.14,
+    "region": "tor1"
+  },
+  "conditions_unchanged": {
+    "batch_size": 8,
+    "d_ff": 1024,
+    "d_model": 512,
+    "dataset": "wikitext2_byte_v1",
+    "evaluation_bytes": 100000,
+    "layers": 12,
+    "new_seeds": [41, 53, 67, 79, 97],
+    "sequence_length": 256,
+    "steps": 500,
+    "training_bytes": 2000000,
+    "training_tokens_per_run": 1024000,
+    "validation_every_steps": 50,
+    "validation_nll_threshold": 1.8
+  },
+  "excluded_alternative": {
+    "accelerator": "nvidia_rtx6000_ada_48gb",
+    "droplet_size": "gpu-6000adax1-48gb",
+    "hourly_rate_usd": 1.57,
+    "reason": "L40S is selected deterministically as the first available equal-price 48 GB NVIDIA size returned by the preflight; no post-result accelerator choice is allowed."
+  },
+  "falsification_unchanged": [
+    "The eight-seed paired 95% confidence interval lower bound remains below 1%.",
+    "Any condition receives a larger token or tuning budget.",
+    "The result depends on excluding a finite completed seed.",
+    "The amended extension exceeds $3.14 or two hours."
+  ],
+  "required_cleanup": "Execute through the reviewed fail-safe executor; retrieve evidence and delete the Droplet on success and failure.",
+  "stopping_rule": "Run all ten new condition-seed runs unless the declared failure or amended cloud budget is exceeded; do not stop for interim effects."
+}
