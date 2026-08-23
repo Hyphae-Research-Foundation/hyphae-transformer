@@ -360,16 +360,28 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
     if plan.accelerator == "amd-rocm":
         environment = "/opt/hyphae-rocm-venv"
         model_root = f"{plan.remote_data_root}/gemma4-e4b"
+        rocm_python = (
+            "$(for candidate in /opt/venv/bin/python /opt/pytorch/bin/python "
+            "/opt/conda/bin/python /usr/local/bin/python3 /usr/bin/python3; do "
+            'if [ -x "$candidate" ] && "$candidate" -c '
+            "'import torch; assert torch.version.hip' >/dev/null 2>&1; then "
+            'printf %s "$candidate"; break; fi; done)'
+        )
         return " && ".join(
             (
                 *common,
                 "rocm-smi --showproductname --showmeminfo vram --showdriverversion",
+                f"ROCM_PYTHON={rocm_python}",
+                'test -n "$ROCM_PYTHON"',
                 (
-                    "python3 -c \"import torch; assert torch.version.hip; "
+                    '"$ROCM_PYTHON" -c "import torch; assert torch.version.hip; '
                     "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
                     "assert 'MI355' in torch.cuda.get_device_name(0)\""
                 ),
-                f"/root/.local/bin/uv venv --system-site-packages {environment}",
+                (
+                    f"/root/.local/bin/uv venv --python \"$ROCM_PYTHON\" "
+                    f"--system-site-packages {environment}"
+                ),
                 (
                     f"/root/.local/bin/uv pip install --python {environment}/bin/python "
                     "transformers==5.14.1"
