@@ -10,6 +10,11 @@ from celiums_rezero.knowledge.acquisition import (
     SecurityRejection,
 )
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
+from celiums_rezero.knowledge.finalization import (
+    DurableFinalizationWorker,
+    FinalAnswer,
+    KnowledgeScheduler,
+)
 from celiums_rezero.knowledge.live import (
     FetchResponse,
     HttpsFetchPolicy,
@@ -50,10 +55,12 @@ __all__ = [
     "BoundedTextParser",
     "ChunkingPolicy",
     "DurableAcquisitionWorker",
+    "DurableFinalizationWorker",
     "DurablePublicationAuthorizer",
     "EvidenceBundle",
     "EvidenceHit",
     "FetchResponse",
+    "FinalAnswer",
     "HttpsFetchPolicy",
     "HttpsSourceConnector",
     "HyphaeRetrievalGateway",
@@ -64,6 +71,7 @@ __all__ = [
     "JobStatus",
     "KnowledgeCoordinator",
     "KnowledgeResponse",
+    "KnowledgeScheduler",
     "PublicationReceiptStore",
     "RetrievalConfig",
     "RetrievalContractError",

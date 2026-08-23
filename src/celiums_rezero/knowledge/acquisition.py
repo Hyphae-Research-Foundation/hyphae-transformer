@@ -348,6 +348,7 @@ class DurableAcquisitionWorker(AcquisitionWorker):
             "prepared_ingest",
             "record_ingest_receipt",
             "ingest_receipt_json",
+            "complete_verification",
             "release",
         )
         if any(not hasattr(store, name) for name in required):
@@ -566,7 +567,6 @@ class DurableAcquisitionWorker(AcquisitionWorker):
         completed = store.complete_verification(
             lease, receipt_json=payload, status=status
         )
-        store.release(lease)
         return AcquisitionOutcome(completed, artifact_digest, receipt)
 
 

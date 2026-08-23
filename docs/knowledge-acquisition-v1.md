@@ -199,6 +199,35 @@ locking; copying only the main file while WAL is active is unsupported. Process-
 tests do not prove storage-device power-loss behavior, which remains a deployment
 qualification requirement.
 
+## Durable Finalization And Scheduling
+
+Schema version 2 adds an immutable notification outbox and an explicit migration from
+schema version 1. A `DurableFinalizationWorker` separately claims `ready`, `answering`,
+or due `notifying` jobs under the same lease/fence authority. Final answers become
+versioned `PreparedNotification` commands bound to tenant, job, query digest, corpus
+generation, host-configured sink, evidence handles, and a deterministic notification
+identity.
+
+The notification command and `answering -> notifying` transition commit atomically.
+The external sink must deduplicate `notification_id`; response loss therefore replays
+the same event rather than inventing another delivery. A typed `NotificationReceipt`
+must match the complete command before `notifying -> completed`, and receipt storage,
+completion, and lease release occur in one transaction. Insufficient evidence instead
+ends as `insufficient_after_ingest` without creating a notification.
+
+Transient sink failures retain `notifying`, persist a bounded error and capped
+exponential backoff, and release the lease for a later due claim. Expired `answering`
+and `notifying` leases are reclaimable with a higher fence. `KnowledgeScheduler.tick()`
+automatically requeues bounded expired pre-outbox work and alternates acquisition and
+finalization claims to prevent either queue from starving; its run loop sleeps only
+when no work was performed. Database leases remain the authority if multiple scheduler
+processes overlap.
+
+Finalization callbacks still require deployment-enforced timeouts; lease expiry and
+sink idempotency preserve replay safety but cannot stop a blocked third-party call.
+Production retry policy also still needs jitter, permanent-error classification,
+dead-letter handling, and operational queue/error metrics.
+
 ## Isolated Hyphae Conformance
 
 Run `scripts/hyphae_knowledge_conformance.py` with the Hyphae 1.2.2 Python SDK on

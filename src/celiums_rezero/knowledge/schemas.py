@@ -540,6 +540,80 @@ class PreparedIngest:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedNotification:
+    tenant: TenantId
+    job_id: str
+    sink_id: str
+    answer: str
+    evidence_handles: tuple[str, ...]
+    corpus_generation: str
+    query_digest: str
+    notification_id: str | None = None
+    command_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"job_[0-9a-f]{16}", self.job_id):
+            raise ValueError("notification job ID is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", self.sink_id):
+            raise ValueError("notification sink ID is invalid")
+        if not self.answer.strip() or len(self.answer.encode()) > 1_000_000:
+            raise ValueError("notification answer is empty or exceeds its byte bound")
+        if (
+            len(self.evidence_handles) > 1024
+            or sum(len(handle) for handle in self.evidence_handles) > 128_000
+            or len(self.evidence_handles) != len(set(self.evidence_handles))
+            or any(not HANDLE_PATTERN.fullmatch(handle) for handle in self.evidence_handles)
+        ):
+            raise ValueError("notification evidence handles are invalid")
+        if not self.corpus_generation or not re.fullmatch(r"[0-9a-f]{64}", self.query_digest):
+            raise ValueError("notification generation or query digest is invalid")
+        identity = {
+            "schema": "knowledge-notification-v1",
+            "tenant": self.tenant.value,
+            "job_id": self.job_id,
+            "sink_id": self.sink_id,
+            "answer": self.answer,
+            "evidence_handles": self.evidence_handles,
+            "corpus_generation": self.corpus_generation,
+            "query_digest": self.query_digest,
+        }
+        expected_notification = f"notification_{content_hash(identity, length=64)}"
+        if self.notification_id is None:
+            object.__setattr__(self, "notification_id", expected_notification)
+        elif self.notification_id != expected_notification:
+            raise ValueError("notification ID does not match its contents")
+        expected_digest = content_hash(
+            {**identity, "notification_id": expected_notification}, length=64
+        )
+        if self.command_digest is None:
+            object.__setattr__(self, "command_digest", expected_digest)
+        elif self.command_digest != expected_digest:
+            raise ValueError("notification command digest does not match its contents")
+
+
+@dataclass(frozen=True, slots=True)
+class NotificationReceipt:
+    tenant: TenantId
+    job_id: str
+    notification_id: str
+    sink_id: str
+    command_digest: str
+    provider_receipt: str
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"job_[0-9a-f]{16}", self.job_id):
+            raise ValueError("notification receipt job ID is invalid")
+        if not re.fullmatch(r"notification_[0-9a-f]{64}", self.notification_id):
+            raise ValueError("notification receipt ID is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", self.sink_id):
+            raise ValueError("notification receipt sink is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.command_digest):
+            raise ValueError("notification receipt command digest is invalid")
+        if not self.provider_receipt or len(self.provider_receipt.encode()) > 4096:
+            raise ValueError("notification provider receipt is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class IngestReceipt:
     tenant: TenantId
     source_id: str

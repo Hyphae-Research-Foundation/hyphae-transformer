@@ -24,6 +24,7 @@ from celiums_rezero.knowledge.schemas import (
     JobStatus,
     KnowledgeChunk,
     PreparedIngest,
+    PreparedNotification,
     PublicationAuthorization,
     PublicationTarget,
     SecurityScanReceipt,
@@ -31,7 +32,7 @@ from celiums_rezero.knowledge.schemas import (
 )
 from celiums_rezero.lab.serialization import canonical_json, content_hash
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAX_OUTBOX_BYTES = 32 * 1024 * 1024
 _LEASE_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -143,8 +144,9 @@ class SQLiteTenantStore:
         self._clock_us = _now_us if clock_us is None else clock_us
         created = self._prepare_path()
         self._initializing = created
+        self._migrating = False
         if not created:
-            self._verify_existing_database()
+            self._migrating = self._verify_existing_database() == 1
         with self._connect() as connection:
             if created:
                 self._initialize_new(connection)
@@ -291,9 +293,9 @@ class SQLiteTenantStore:
     ) -> tuple[AcquisitionJob, JobLease] | None:
         if not _LEASE_OWNER_PATTERN.fullmatch(owner_id) or lease_seconds <= 0:
             raise ValueError("lease owner and duration are required")
-        now = self._clock_us()
-        expires = now + int(lease_seconds * 1_000_000)
         with self._transaction() as connection:
+            now = self._clock_us()
+            expires = now + int(lease_seconds * 1_000_000)
             parameters: list[object] = [now]
             predicate = ""
             if job_id is not None:
@@ -334,8 +336,12 @@ class SQLiteTenantStore:
                 )
         return job, JobLease(self.tenant, cast(str, job.job_id), owner_id, fence, expires)
 
-    def recover_expired(self, *, job_id: str | None = None) -> int:
+    def recover_expired(
+        self, *, job_id: str | None = None, limit: int = 100
+    ) -> int:
         """Requeue expired pre-outbox work; exact ingest phases resume in place."""
+        if limit < 1 or limit > 10_000:
+            raise ValueError("recovery limit is invalid")
         now = self._clock_us()
         parameters: list[object] = [now]
         predicate = ""
@@ -353,8 +359,10 @@ class SQLiteTenantStore:
                   AND leases.owner_id IS NOT NULL
                   AND leases.expires_at_us <= ?
                   {predicate}
+                ORDER BY jobs.updated_at_us, jobs.job_id
+                LIMIT ?
                 """,
-                tuple(parameters),
+                (*parameters, limit),
             ).fetchall()
             identities = tuple(cast(str, row["job_id"]) for row in rows)
             for identity in identities:
@@ -378,9 +386,9 @@ class SQLiteTenantStore:
         self._require_lease(lease)
         if lease_seconds <= 0:
             raise ValueError("lease duration must be positive")
-        now = self._clock_us()
-        expires = now + int(lease_seconds * 1_000_000)
         with self._transaction() as connection:
+            now = self._clock_us()
+            expires = now + int(lease_seconds * 1_000_000)
             cursor = connection.execute(
                 "UPDATE leases SET expires_at_us = ? WHERE job_id = ? AND owner_id = ? "
                 "AND fence = ? AND expires_at_us > ?",
@@ -485,9 +493,260 @@ class SQLiteTenantStore:
             )
             if cursor.rowcount != 1:
                 raise PermissionError("verifying job changed before completion")
+            connection.execute(
+                "UPDATE leases SET owner_id = NULL, acquired_at_us = NULL, "
+                "expires_at_us = NULL WHERE job_id = ? AND owner_id = ? AND fence = ?",
+                (lease.job_id, lease.owner_id, lease.fence),
+            )
         updated = self.get(self.tenant, lease.job_id)
         assert updated is not None
         return updated
+
+    def claim_finalization(
+        self,
+        *,
+        owner_id: str,
+        lease_seconds: float,
+        job_id: str | None = None,
+    ) -> tuple[AcquisitionJob, JobLease] | None:
+        if not _LEASE_OWNER_PATTERN.fullmatch(owner_id) or lease_seconds <= 0:
+            raise ValueError("finalization lease owner and duration are required")
+        with self._transaction() as connection:
+            now = self._clock_us()
+            expires = now + int(lease_seconds * 1_000_000)
+            parameters: list[object] = [now, now]
+            predicate = ""
+            if job_id is not None:
+                predicate = "AND jobs.job_id = ?"
+                parameters.append(job_id)
+            row = connection.execute(
+                f"""
+                SELECT jobs.*, leases.fence
+                FROM jobs JOIN leases USING (job_id)
+                LEFT JOIN notification_outbox USING (job_id)
+                WHERE jobs.status IN ('ready', 'answering', 'notifying')
+                  AND (leases.owner_id IS NULL OR leases.expires_at_us <= ?)
+                  AND (
+                    jobs.status != 'notifying'
+                    OR notification_outbox.next_attempt_at_us <= ?
+                  )
+                  {predicate}
+                ORDER BY jobs.updated_at_us, jobs.job_id
+                LIMIT 1
+                """,
+                tuple(parameters),
+            ).fetchone()
+            if row is None:
+                return None
+            fence = int(row["fence"]) + 1
+            connection.execute(
+                "UPDATE leases SET owner_id = ?, fence = ?, acquired_at_us = ?, "
+                "expires_at_us = ? WHERE job_id = ?",
+                (owner_id, fence, now, expires, row["job_id"]),
+            )
+            job = _row_job(row, self.tenant)
+            if job.status is JobStatus.READY:
+                connection.execute(
+                    "UPDATE jobs SET status = 'answering', updated_at_us = ? "
+                    "WHERE job_id = ? AND status = 'ready'",
+                    (now, job.job_id),
+                )
+                job = replace(job, status=JobStatus.ANSWERING, updated_at=_us_to_iso(now))
+        return job, JobLease(self.tenant, cast(str, job.job_id), owner_id, fence, expires)
+
+    def complete_insufficient(self, lease: JobLease, *, failure: str) -> AcquisitionJob:
+        self._require_lease(lease)
+        if not failure:
+            raise ValueError("insufficient finalization failure is required")
+        with self._transaction() as connection:
+            now = self._clock_us()
+            job = self._leased_job(connection, lease, now)
+            if job.status is not JobStatus.ANSWERING:
+                raise ValueError("only answering jobs can become insufficient")
+            connection.execute(
+                "UPDATE jobs SET status = 'insufficient_after_ingest', updated_at_us = ?, "
+                "failure = ? WHERE job_id = ? AND status = 'answering'",
+                (now, failure, lease.job_id),
+            )
+            self._clear_lease(connection, lease)
+        updated = self.get(self.tenant, lease.job_id)
+        assert updated is not None
+        return updated
+
+    def stage_notification(
+        self, lease: JobLease, command: PreparedNotification
+    ) -> None:
+        self._require_lease(lease)
+        if command.tenant != self.tenant or command.job_id != lease.job_id:
+            raise PermissionError("notification crossed its tenant or job binding")
+        payload = encode_prepared_notification(command)
+        with self._transaction() as connection:
+            now = self._clock_us()
+            job = self._leased_job(connection, lease, now)
+            if job.status is not JobStatus.ANSWERING:
+                raise ValueError("only answering jobs can stage notification")
+            if (
+                command.query_digest != job.query_digest
+                or command.corpus_generation != job.corpus_generation
+            ):
+                raise ValueError("notification does not match its durable job")
+            existing = connection.execute(
+                "SELECT command_digest, payload_json FROM notification_outbox "
+                "WHERE job_id = ?",
+                (lease.job_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["command_digest"] != command.command_digest or existing[
+                    "payload_json"
+                ] != payload:
+                    raise FileExistsError("immutable notification outbox differs")
+            else:
+                connection.execute(
+                    "INSERT INTO notification_outbox "
+                    "(job_id, notification_id, sink_id, command_digest, payload_json, "
+                    "created_at_us, attempts, next_attempt_at_us) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+                    (
+                        lease.job_id,
+                        command.notification_id,
+                        command.sink_id,
+                        command.command_digest,
+                        payload,
+                        now,
+                        now,
+                    ),
+                )
+            connection.execute(
+                "UPDATE jobs SET status = 'notifying', updated_at_us = ? "
+                "WHERE job_id = ? AND status = 'answering'",
+                (now, lease.job_id),
+            )
+
+    def prepared_notification(
+        self, tenant: TenantId, job_id: str
+    ) -> PreparedNotification | None:
+        self._require_tenant(tenant)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT notification_outbox.*, jobs.query_digest, jobs.corpus_generation "
+                "FROM notification_outbox JOIN jobs USING (job_id) WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        command = decode_prepared_notification(cast(str, row["payload_json"]))
+        if (
+            command.tenant != self.tenant
+            or command.command_digest != row["command_digest"]
+            or command.job_id != job_id
+            or command.notification_id != row["notification_id"]
+            or command.sink_id != row["sink_id"]
+            or command.query_digest != row["query_digest"]
+            or command.corpus_generation != row["corpus_generation"]
+        ):
+            raise RuntimeError("durable notification outbox integrity failed")
+        return command
+
+    def notification_attempts(self, tenant: TenantId, job_id: str) -> int:
+        self._require_tenant(tenant)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT attempts FROM notification_outbox WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError("notification outbox is absent")
+        return int(row["attempts"])
+
+    def defer_notification(
+        self,
+        lease: JobLease,
+        *,
+        error: str,
+        delay_seconds: float,
+    ) -> None:
+        self._require_lease(lease)
+        if not error or delay_seconds <= 0:
+            raise ValueError("notification retry evidence is invalid")
+        with self._transaction() as connection:
+            now = self._clock_us()
+            next_attempt = now + int(delay_seconds * 1_000_000)
+            job = self._leased_job(connection, lease, now)
+            if job.status is not JobStatus.NOTIFYING:
+                raise ValueError("only notifying jobs can be deferred")
+            cursor = connection.execute(
+                "UPDATE notification_outbox SET attempts = attempts + 1, "
+                "next_attempt_at_us = ?, last_error = ? WHERE job_id = ? "
+                "AND receipt_json IS NULL",
+                (next_attempt, error[:4096], lease.job_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("notification retry could not be recorded")
+            self._clear_lease(connection, lease)
+
+    def complete_notification(
+        self, lease: JobLease, receipt_json: str
+    ) -> AcquisitionJob:
+        from celiums_rezero.knowledge.finalization import decode_notification_receipt
+
+        self._require_lease(lease)
+        receipt_digest = hashlib.sha256(receipt_json.encode()).hexdigest()
+        with self._transaction() as connection:
+            now = self._clock_us()
+            job = self._leased_job(connection, lease, now)
+            if job.status is not JobStatus.NOTIFYING:
+                raise ValueError("only notifying jobs can complete notification")
+            outbox = connection.execute(
+                "SELECT * FROM notification_outbox WHERE job_id = ?", (lease.job_id,)
+            ).fetchone()
+            if outbox is None:
+                raise RuntimeError("notifying job has no durable outbox")
+            command = decode_prepared_notification(cast(str, outbox["payload_json"]))
+            receipt = decode_notification_receipt(receipt_json)
+            if (
+                command.tenant != self.tenant
+                or command.job_id != lease.job_id
+                or command.query_digest != job.query_digest
+                or command.corpus_generation != job.corpus_generation
+                or command.notification_id != outbox["notification_id"]
+                or command.sink_id != outbox["sink_id"]
+                or command.command_digest != outbox["command_digest"]
+                or receipt.tenant != command.tenant
+                or receipt.job_id != command.job_id
+                or receipt.notification_id != command.notification_id
+                or receipt.sink_id != command.sink_id
+                or receipt.command_digest != command.command_digest
+            ):
+                raise PermissionError("notification receipt does not match its command")
+            if outbox["receipt_json"] is not None and (
+                outbox["receipt_json"] != receipt_json
+                or outbox["receipt_digest"] != receipt_digest
+            ):
+                raise FileExistsError("immutable notification receipt differs")
+            connection.execute(
+                "UPDATE notification_outbox SET receipt_json = ?, receipt_digest = ?, "
+                "delivered_at_us = ?, attempts = attempts + 1, last_error = NULL "
+                "WHERE job_id = ?",
+                (receipt_json, receipt_digest, now, lease.job_id),
+            )
+            connection.execute(
+                "UPDATE jobs SET status = 'completed', updated_at_us = ?, failure = NULL "
+                "WHERE job_id = ? AND status = 'notifying'",
+                (now, lease.job_id),
+            )
+            self._clear_lease(connection, lease)
+        updated = self.get(self.tenant, lease.job_id)
+        assert updated is not None
+        return updated
+
+    @staticmethod
+    def _clear_lease(connection: sqlite3.Connection, lease: JobLease) -> None:
+        cursor = connection.execute(
+            "UPDATE leases SET owner_id = NULL, acquired_at_us = NULL, "
+            "expires_at_us = NULL WHERE job_id = ? AND owner_id = ? AND fence = ?",
+            (lease.job_id, lease.owner_id, lease.fence),
+        )
+        if cursor.rowcount != 1:
+            raise PermissionError("lease changed before durable completion")
 
     def release(self, lease: JobLease) -> None:
         self._require_lease(lease)
@@ -729,10 +988,11 @@ class SQLiteTenantStore:
             connection.execute("PRAGMA trusted_schema=OFF")
             if (
                 not self._initializing
+                and not self._migrating
                 and connection.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal"
             ):
                 raise RuntimeError("SQLite WAL durability changed")
-            if not self._initializing:
+            if not self._initializing and not self._migrating:
                 objects = {
                     (cast(str, row[0]), cast(str, row[1]))
                     for row in connection.execute(
@@ -751,7 +1011,8 @@ class SQLiteTenantStore:
                 schema_rows = connection.execute(
                     "SELECT type, name, sql FROM sqlite_master "
                     "WHERE name IN "
-                    "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created') "
+                    "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+                    "'jobs_status_created','notification_due') "
                     "ORDER BY type, name"
                 ).fetchall()
                 schema_digest = hashlib.sha256(
@@ -792,7 +1053,7 @@ class SQLiteTenantStore:
                 connection.execute("ROLLBACK")
             raise
 
-    def _verify_existing_database(self) -> None:
+    def _verify_existing_database(self) -> int:
         uri = f"{self.path.as_uri()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=self.timeout_seconds)
         connection.row_factory = sqlite3.Row
@@ -803,7 +1064,24 @@ class SQLiteTenantStore:
                     "SELECT name FROM sqlite_master WHERE type = 'table'"
                 ).fetchall()
             }
-            required = {"tenant_meta", "jobs", "leases", "ingest_outbox"}
+            if "tenant_meta" not in tables:
+                raise PermissionError("SQLite database is not a recognized tenant authority")
+            row = connection.execute(
+                "SELECT tenant_id, schema_version FROM tenant_meta WHERE singleton = 1"
+            ).fetchone()
+            if row is None or row["tenant_id"] != self.tenant.value:
+                raise PermissionError("SQLite database belongs to another tenant")
+            version = int(row["schema_version"])
+            if version not in {1, _SCHEMA_VERSION}:
+                raise PermissionError("SQLite database schema version is unsupported")
+            required = {
+                "tenant_meta",
+                "jobs",
+                "leases",
+                "ingest_outbox",
+            }
+            if version == _SCHEMA_VERSION:
+                required.add("notification_outbox")
             if tables != required:
                 raise PermissionError("SQLite database is not a recognized tenant authority")
             forbidden = connection.execute(
@@ -812,7 +1090,7 @@ class SQLiteTenantStore:
             ).fetchall()
             if forbidden:
                 raise PermissionError("SQLite tenant schema contains executable extensions")
-            expected_columns = {
+            expected_columns: dict[str, set[str]] = {
                 "tenant_meta": {"singleton", "tenant_id", "schema_version", "created_at_us"},
                 "jobs": {
                     "job_id",
@@ -839,6 +1117,21 @@ class SQLiteTenantStore:
                     "receipt_digest",
                 },
             }
+            if version == _SCHEMA_VERSION:
+                expected_columns["notification_outbox"] = {
+                    "job_id",
+                    "notification_id",
+                    "sink_id",
+                    "command_digest",
+                    "payload_json",
+                    "created_at_us",
+                    "attempts",
+                    "next_attempt_at_us",
+                    "last_error",
+                    "receipt_json",
+                    "receipt_digest",
+                    "delivered_at_us",
+                }
             for table, columns in expected_columns.items():
                 info = connection.execute(f"PRAGMA table_info({table})").fetchall()
                 observed = {cast(str, row[1]) for row in info}
@@ -848,7 +1141,12 @@ class SQLiteTenantStore:
             outbox_keys = connection.execute(
                 "PRAGMA foreign_key_list(ingest_outbox)"
             ).fetchall()
-            if not foreign_keys or not outbox_keys:
+            notification_keys = (
+                connection.execute("PRAGMA foreign_key_list(notification_outbox)").fetchall()
+                if version == _SCHEMA_VERSION
+                else (object(),)
+            )
+            if not foreign_keys or not outbox_keys or not notification_keys:
                 raise PermissionError("SQLite tenant schema foreign keys are incompatible")
             indexes = {
                 cast(str, row[0])
@@ -857,32 +1155,36 @@ class SQLiteTenantStore:
                     "AND name NOT LIKE 'sqlite_%'"
                 ).fetchall()
             }
-            if indexes != {"jobs_status_created"}:
+            expected_indexes = {"jobs_status_created"}
+            if version == _SCHEMA_VERSION:
+                expected_indexes.add("notification_due")
+            if indexes != expected_indexes:
                 raise PermissionError("SQLite tenant schema indexes are incompatible")
+            names = (
+                "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+                "'jobs_status_created','notification_due')"
+                if version == _SCHEMA_VERSION
+                else "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created')"
+            )
             schema_rows = connection.execute(
                 "SELECT type, name, sql FROM sqlite_master "
-                "WHERE name IN "
-                "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created') "
-                "ORDER BY type, name"
+                f"WHERE name IN {names} ORDER BY type, name"
             ).fetchall()
             schema_digest = hashlib.sha256(
                 canonical_json([tuple(row) for row in schema_rows]).encode()
             ).hexdigest()
-            if schema_digest != _EXPECTED_SCHEMA_DIGEST:
+            expected_digest = (
+                _EXPECTED_SCHEMA_DIGEST
+                if version == _SCHEMA_VERSION
+                else _EXPECTED_SCHEMA_V1_DIGEST
+            )
+            if schema_digest != expected_digest:
                 raise PermissionError("SQLite tenant schema definition is incompatible")
-            row = connection.execute(
-                "SELECT tenant_id, schema_version FROM tenant_meta WHERE singleton = 1"
-            ).fetchone()
-            if (
-                row is None
-                or row["tenant_id"] != self.tenant.value
-                or row["schema_version"] != _SCHEMA_VERSION
-            ):
-                raise PermissionError("SQLite database belongs to another tenant or schema")
             if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise RuntimeError("SQLite quick_check failed")
             if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
                 raise RuntimeError("SQLite foreign key check failed")
+            return version
         finally:
             connection.close()
 
@@ -890,6 +1192,68 @@ class SQLiteTenantStore:
         mode = connection.execute("PRAGMA journal_mode=WAL").fetchone()[0]
         if str(mode).lower() != "wal":
             raise RuntimeError("SQLite WAL durability is unavailable")
+        if self._migrating:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                version = connection.execute(
+                    "SELECT schema_version FROM tenant_meta WHERE singleton = 1"
+                ).fetchone()[0]
+                if version == 1:
+                    objects = {
+                        (cast(str, row[0]), cast(str, row[1]))
+                        for row in connection.execute(
+                            "SELECT type, name FROM sqlite_master "
+                            "WHERE name NOT LIKE 'sqlite_%'"
+                        ).fetchall()
+                    }
+                    if objects != _EXPECTED_SCHEMA_V1_OBJECTS:
+                        raise RuntimeError("SQLite v1 schema changed before migration")
+                    rows = connection.execute(
+                        "SELECT type, name, sql FROM sqlite_master "
+                        "WHERE name IN "
+                        "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created') "
+                        "ORDER BY type, name"
+                    ).fetchall()
+                    digest = hashlib.sha256(
+                        canonical_json([tuple(row) for row in rows]).encode()
+                    ).hexdigest()
+                    if digest != _EXPECTED_SCHEMA_V1_DIGEST:
+                        raise RuntimeError("SQLite v1 schema definition changed before migration")
+                    connection.execute(_NOTIFICATION_TABLE_SQL)
+                    connection.execute(_NOTIFICATION_INDEX_SQL)
+                    connection.execute(
+                        "UPDATE tenant_meta SET schema_version = ? "
+                        "WHERE singleton = 1 AND schema_version = 1",
+                        (_SCHEMA_VERSION,),
+                    )
+                elif version != _SCHEMA_VERSION:
+                    raise RuntimeError("SQLite tenant schema migration version changed")
+                if connection.in_transaction:
+                    connection.execute("COMMIT")
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            self._migrating = False
+            objects = {
+                (cast(str, row[0]), cast(str, row[1]))
+                for row in connection.execute(
+                    "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+            }
+            if objects != _EXPECTED_SCHEMA_OBJECTS:
+                raise RuntimeError("SQLite tenant schema migration is incomplete")
+            rows = connection.execute(
+                "SELECT type, name, sql FROM sqlite_master "
+                "WHERE name IN "
+                "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+                "'jobs_status_created','notification_due') ORDER BY type, name"
+            ).fetchall()
+            digest = hashlib.sha256(
+                canonical_json([tuple(row) for row in rows]).encode()
+            ).hexdigest()
+            if digest != _EXPECTED_SCHEMA_DIGEST:
+                raise RuntimeError("SQLite v2 schema migration digest is invalid")
 
     @staticmethod
     def _check_integrity(connection: sqlite3.Connection) -> None:
@@ -930,6 +1294,55 @@ def encode_prepared_ingest(command: PreparedIngest) -> str:
         assert isinstance(item, dict)
         item["values"] = [float(number).hex() for number in item["values"]]
     return canonical_json({"schema": "knowledge-prepared-ingest-v1", "value": value})
+
+
+def encode_prepared_notification(command: PreparedNotification) -> str:
+    return canonical_json(
+        {"schema": "knowledge-prepared-notification-v1", "value": command}
+    )
+
+
+def decode_prepared_notification(payload: str) -> PreparedNotification:
+    parsed = json.loads(payload, object_pairs_hook=_unique_object)
+    if canonical_json(parsed) != payload or not isinstance(parsed, dict):
+        raise ValueError("prepared notification is not canonical")
+    if set(parsed) != {"schema", "value"} or parsed["schema"] != (
+        "knowledge-prepared-notification-v1"
+    ):
+        raise ValueError("prepared notification envelope is invalid")
+    value = parsed["value"]
+    fields = {
+        "tenant",
+        "job_id",
+        "sink_id",
+        "answer",
+        "evidence_handles",
+        "corpus_generation",
+        "query_digest",
+        "notification_id",
+        "command_digest",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("prepared notification fields are invalid")
+    tenant = value["tenant"]
+    handles = value["evidence_handles"]
+    if (
+        not isinstance(tenant, dict)
+        or set(tenant) != {"value"}
+        or not isinstance(handles, list)
+    ):
+        raise ValueError("prepared notification bindings are invalid")
+    return PreparedNotification(
+        tenant=TenantId(_string(tenant["value"])),
+        job_id=_string(value["job_id"]),
+        sink_id=_string(value["sink_id"]),
+        answer=_string(value["answer"]),
+        evidence_handles=tuple(_string(handle) for handle in handles),
+        corpus_generation=_string(value["corpus_generation"]),
+        query_digest=_string(value["query_digest"]),
+        notification_id=_string(value["notification_id"]),
+        command_digest=_string(value["command_digest"]),
+    )
 
 
 def decode_prepared_ingest(payload: str) -> PreparedIngest:
@@ -1319,13 +1732,43 @@ CREATE TABLE IF NOT EXISTS ingest_outbox (
 );
 """
 
+_NOTIFICATION_TABLE_SQL = """
+CREATE TABLE notification_outbox (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE,
+    notification_id TEXT NOT NULL UNIQUE,
+    sink_id TEXT NOT NULL,
+    command_digest TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at_us INTEGER NOT NULL,
+    attempts INTEGER NOT NULL CHECK (attempts >= 0),
+    next_attempt_at_us INTEGER NOT NULL,
+    last_error TEXT,
+    receipt_json TEXT,
+    receipt_digest TEXT,
+    delivered_at_us INTEGER,
+    CHECK ((receipt_json IS NULL AND receipt_digest IS NULL AND delivered_at_us IS NULL)
+        OR (receipt_json IS NOT NULL AND receipt_digest IS NOT NULL
+            AND delivered_at_us IS NOT NULL))
+)
+"""
+
+_NOTIFICATION_INDEX_SQL = """
+CREATE INDEX notification_due ON notification_outbox(next_attempt_at_us, job_id)
+"""
+
+_NOTIFICATION_SCHEMA = _NOTIFICATION_TABLE_SQL + ";" + _NOTIFICATION_INDEX_SQL + ";"
+
+_SCHEMA_V1 = _SCHEMA
+_SCHEMA += _NOTIFICATION_SCHEMA
+
 def _expected_schema_digest() -> str:
     connection = sqlite3.connect(":memory:")
     try:
         connection.executescript(_SCHEMA)
         rows = connection.execute(
             "SELECT type, name, sql FROM sqlite_master "
-            "WHERE name IN ('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created') "
+            "WHERE name IN ('tenant_meta','jobs','leases','ingest_outbox',"
+            "'notification_outbox','jobs_status_created','notification_due') "
             "ORDER BY type, name"
         ).fetchall()
         return hashlib.sha256(canonical_json([tuple(row) for row in rows]).encode()).hexdigest()
@@ -1333,8 +1776,34 @@ def _expected_schema_digest() -> str:
         connection.close()
 
 
+def _schema_digest(schema: str, names: str) -> str:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.executescript(schema)
+        rows = connection.execute(
+            "SELECT type, name, sql FROM sqlite_master "
+            f"WHERE name IN {names} ORDER BY type, name"
+        ).fetchall()
+        return hashlib.sha256(canonical_json([tuple(row) for row in rows]).encode()).hexdigest()
+    finally:
+        connection.close()
+
+
 _EXPECTED_SCHEMA_DIGEST = _expected_schema_digest()
+_EXPECTED_SCHEMA_V1_DIGEST = _schema_digest(
+    _SCHEMA_V1,
+    "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created')",
+)
 _EXPECTED_SCHEMA_OBJECTS = {
+    ("table", "tenant_meta"),
+    ("table", "jobs"),
+    ("table", "leases"),
+    ("table", "ingest_outbox"),
+    ("table", "notification_outbox"),
+    ("index", "jobs_status_created"),
+    ("index", "notification_due"),
+}
+_EXPECTED_SCHEMA_V1_OBJECTS = {
     ("table", "tenant_meta"),
     ("table", "jobs"),
     ("table", "leases"),
