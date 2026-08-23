@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Celiums knowledge worker for %i
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5s
+RandomizedDelaySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

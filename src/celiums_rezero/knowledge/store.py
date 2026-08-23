@@ -23,6 +23,9 @@ from celiums_rezero.knowledge.schemas import (
     FinalizationDeadLetter,
     FinalizationPhase,
     FinalizationQueueSnapshot,
+    GenerationChangeReceipt,
+    GenerationManifest,
+    GenerationSnapshot,
     IngestMode,
     JobLease,
     JobStatus,
@@ -36,7 +39,7 @@ from celiums_rezero.knowledge.schemas import (
 )
 from celiums_rezero.lab.serialization import canonical_json, content_hash
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _MAX_OUTBOX_BYTES = 32 * 1024 * 1024
 _LEASE_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -183,9 +186,52 @@ class SQLiteTenantStore:
         ):
             raise ValueError("new durable jobs must be pristine and queued")
         assert job.job_id is not None
-        identity_digest = _job_identity_digest(job)
         now = self._clock_us()
         with self._transaction() as connection:
+            routing = connection.execute(
+                "SELECT active_generation_id, claims_paused FROM generation_state "
+                "WHERE singleton = 1"
+            ).fetchone()
+            if routing is not None and routing["claims_paused"]:
+                return None
+            candidate = connection.execute(
+                "SELECT state FROM generation_manifests WHERE generation_id = ?",
+                (job.corpus_generation,),
+            ).fetchone()
+            manifest_count = connection.execute(
+                "SELECT COUNT(*) FROM generation_manifests"
+            ).fetchone()[0]
+            if routing is None and manifest_count:
+                return None
+            if routing is not None and job.corpus_generation == routing[
+                "active_generation_id"
+            ]:
+                candidate = connection.execute(
+                    "SELECT generation_id, state FROM generation_manifests "
+                    "WHERE parent_generation_id = ? AND state = 'building' "
+                    "ORDER BY created_at_us, generation_id LIMIT 1",
+                    (routing["active_generation_id"],),
+                ).fetchone()
+                if candidate is None:
+                    return None
+                job = replace(
+                    job,
+                    corpus_generation=cast(str, candidate["generation_id"]),
+                    job_id=None,
+                )
+                assert job.job_id is not None
+                identity_digest = _job_identity_digest(job)
+                routed = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id = ?", (job.job_id,)
+                ).fetchone()
+                if routed is not None:
+                    existing = _row_job(routed, self.tenant)
+                    if routed["identity_digest"] != identity_digest:
+                        raise RuntimeError("durable routed job identity collision")
+                    return existing, True
+            if routing is not None and (candidate is None or candidate["state"] != "building"):
+                return None
+            identity_digest = _job_identity_digest(job)
             row = connection.execute(
                 "SELECT * FROM jobs WHERE job_id = ?", (job.job_id,)
             ).fetchone()
@@ -230,6 +276,7 @@ class SQLiteTenantStore:
             connection.execute(
                 "INSERT INTO leases (job_id, fence) VALUES (?, 0)", (job.job_id,)
             )
+        assert job.job_id is not None
         stored = self.get(job.tenant, job.job_id)
         assert stored is not None
         return stored, False
@@ -294,28 +341,62 @@ class SQLiteTenantStore:
         owner_id: str,
         lease_seconds: float,
         job_id: str | None = None,
+        target: PublicationTarget | None = None,
     ) -> tuple[AcquisitionJob, JobLease] | None:
         if not _LEASE_OWNER_PATTERN.fullmatch(owner_id) or lease_seconds <= 0:
             raise ValueError("lease owner and duration are required")
         with self._transaction() as connection:
             now = self._clock_us()
+            routing = connection.execute(
+                "SELECT active_generation_id, claims_paused FROM generation_state "
+                "WHERE singleton = 1"
+            ).fetchone()
+            if routing is not None and routing["claims_paused"]:
+                return None
             expires = now + int(lease_seconds * 1_000_000)
-            parameters: list[object] = [now]
+            job_parameters: list[object] = []
             predicate = ""
             if job_id is not None:
                 predicate = "AND jobs.job_id = ?"
-                parameters.append(job_id)
+                job_parameters.append(job_id)
+            target_predicate = ""
+            target_parameters: tuple[object, ...] = ()
+            if target is not None:
+                target_predicate = (
+                    "AND EXISTS (SELECT 1 FROM generation_manifests gt "
+                    "WHERE gt.generation_id = jobs.corpus_generation "
+                    "AND gt.backend_id = ? AND gt.collection_id = ? "
+                    "AND gt.vector_target = ?)"
+                )
+                target_parameters = (
+                    target.backend_id,
+                    target.collection,
+                    target.vector_target,
+                )
             row = connection.execute(
                 f"""
                 SELECT jobs.*, leases.fence
                 FROM jobs JOIN leases USING (job_id)
                 WHERE jobs.status IN ('queued', 'ingesting', 'verifying')
+                  AND (
+                    ? IS NULL OR jobs.corpus_generation = ? OR EXISTS (
+                        SELECT 1 FROM generation_manifests g
+                        WHERE g.generation_id = jobs.corpus_generation AND g.state = 'building'
+                    )
+                  )
                   AND (leases.owner_id IS NULL OR leases.expires_at_us <= ?)
+                  {target_predicate}
                   {predicate}
                 ORDER BY jobs.created_at_us, jobs.job_id
                 LIMIT 1
                 """,
-                tuple(parameters),
+                (
+                    None if routing is None else routing["active_generation_id"],
+                    None if routing is None else routing["active_generation_id"],
+                    now,
+                    *target_parameters,
+                    *job_parameters,
+                ),
             ).fetchone()
             if row is None:
                 return None
@@ -517,6 +598,16 @@ class SQLiteTenantStore:
             raise ValueError("finalization lease owner and duration are required")
         with self._transaction() as connection:
             now = self._clock_us()
+            routing = connection.execute(
+                "SELECT active_generation_id, claims_paused FROM generation_state "
+                "WHERE singleton = 1"
+            ).fetchone()
+            if routing is not None and routing["claims_paused"]:
+                return None
+            if routing is None and connection.execute(
+                "SELECT COUNT(*) FROM generation_manifests"
+            ).fetchone()[0]:
+                return None
             expires = now + int(lease_seconds * 1_000_000)
             parameters: list[object] = [now, now, now]
             predicate = ""
@@ -530,6 +621,7 @@ class SQLiteTenantStore:
                 LEFT JOIN notification_outbox USING (job_id)
                 LEFT JOIN answer_retries USING (job_id)
                 WHERE jobs.status IN ('ready', 'answering', 'notifying')
+                  AND (? IS NULL OR jobs.corpus_generation = ?)
                   AND (leases.owner_id IS NULL OR leases.expires_at_us <= ?)
                   AND (
                     (jobs.status = 'ready')
@@ -544,7 +636,11 @@ class SQLiteTenantStore:
                 ORDER BY jobs.updated_at_us, jobs.job_id
                 LIMIT 1
                 """,
-                tuple(parameters),
+                (
+                    None if routing is None else routing["active_generation_id"],
+                    None if routing is None else routing["active_generation_id"],
+                    *parameters,
+                ),
             ).fetchone()
             if row is None:
                 return None
@@ -892,6 +988,416 @@ class SQLiteTenantStore:
             ),
         )
 
+    def register_generation(self, manifest: GenerationManifest) -> None:
+        self._require_tenant(manifest.tenant)
+        payload = canonical_json(manifest)
+        with self._transaction() as connection:
+            sibling = connection.execute(
+                "SELECT generation_id FROM generation_manifests "
+                "WHERE parent_generation_id IS ? AND state = 'building' "
+                "AND generation_id != ?",
+                (manifest.parent_generation_id, manifest.generation_id),
+            ).fetchone()
+            if sibling is not None:
+                raise ValueError("another building generation already uses this parent")
+            conflict = connection.execute(
+                "SELECT generation_id FROM generation_manifests "
+                "WHERE backend_id = ? AND collection_id = ? AND generation_id != ?",
+                (
+                    manifest.target.backend_id,
+                    manifest.target.collection,
+                    manifest.generation_id,
+                ),
+            ).fetchone()
+            if conflict is not None:
+                raise ValueError("generation target collection is already registered")
+            existing = connection.execute(
+                "SELECT manifest_json, state FROM generation_manifests WHERE generation_id = ?",
+                (manifest.generation_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["manifest_json"] != payload and existing["state"] == "building":
+                    raise FileExistsError("immutable generation manifest differs")
+                return
+            connection.execute(
+                "INSERT INTO generation_manifests "
+                "(generation_id, backend_id, collection_id, vector_target, "
+                "parent_generation_id, manifest_digest, manifest_json, state, created_at_us) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'building', ?)",
+                (
+                    manifest.generation_id,
+                    manifest.target.backend_id,
+                    manifest.target.collection,
+                    manifest.target.vector_target,
+                    manifest.parent_generation_id,
+                    manifest.manifest_digest,
+                    payload,
+                    self._clock_us(),
+                ),
+            )
+
+    def _verify_generation(self, manifest: GenerationManifest) -> None:
+        del manifest
+        raise PermissionError("generation verification requires durable receipt authority")
+
+    def _complete_generation_manifest(
+        self, initial: GenerationManifest, completed: GenerationManifest
+    ) -> None:
+        if initial.generation_id != completed.generation_id:
+            raise ValueError("completed generation changed its identity")
+        if (
+            initial.tenant != completed.tenant
+            or initial.target != completed.target
+            or initial.parent_generation_id != completed.parent_generation_id
+            or initial.chunk_ids != completed.chunk_ids
+            or initial.ingest_idempotency_keys != completed.ingest_idempotency_keys
+        ):
+            raise ValueError("completed generation changed immutable manifest fields")
+        expected_token = hashlib.sha256(
+            b"generation-verification-v1\0"
+            + (initial.manifest_digest or "").encode()
+            + b"".join(value.encode() for value in completed.ingest_receipt_digests)
+        ).hexdigest()
+        if completed.verification_token != expected_token:
+            raise PermissionError("generation verification token is invalid")
+        payload = canonical_json(completed)
+        with self._transaction() as connection:
+            existing = connection.execute(
+                "SELECT manifest_json, state FROM generation_manifests "
+                "WHERE generation_id = ?",
+                (initial.generation_id,),
+            ).fetchone()
+            if existing is not None and existing["state"] == "verified":
+                if existing["manifest_json"] != payload:
+                    raise FileExistsError("verified generation manifest differs")
+                return
+            cursor = connection.execute(
+                "UPDATE generation_manifests SET manifest_digest = ?, manifest_json = ?, "
+                "state = 'verified', verified_at_us = ? WHERE generation_id = ? "
+                "AND manifest_digest = ? AND state = 'building'",
+                (
+                    completed.manifest_digest,
+                    payload,
+                    self._clock_us(),
+                    initial.generation_id,
+                    initial.manifest_digest,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("generation changed before verification completion")
+
+    def generation_snapshot(self, tenant: TenantId) -> GenerationSnapshot:
+        self._require_tenant(tenant)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT s.active_generation_id, s.revision, s.claims_paused, "
+                "m.backend_id, m.collection_id, m.vector_target, m.manifest_digest "
+                "FROM generation_state s JOIN generation_manifests m "
+                "ON m.generation_id = s.active_generation_id WHERE s.singleton = 1"
+            ).fetchone()
+        if row is None:
+            raise LookupError("tenant has no active generation")
+        return GenerationSnapshot(
+            tenant=tenant,
+            generation_id=cast(str, row["active_generation_id"]),
+            target=PublicationTarget(
+                cast(str, row["backend_id"]),
+                cast(int, row["collection_id"]),
+                cast(str, row["vector_target"]),
+            ),
+            manifest_digest=cast(str, row["manifest_digest"]),
+            revision=cast(int, row["revision"]),
+            claims_paused=bool(row["claims_paused"]),
+        )
+
+    def generation_target(self, generation_id: str) -> PublicationTarget:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT backend_id, collection_id, vector_target FROM generation_manifests "
+                "WHERE generation_id = ?",
+                (generation_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError("generation target is not registered")
+        return PublicationTarget(
+            cast(str, row["backend_id"]),
+            cast(int, row["collection_id"]),
+            cast(str, row["vector_target"]),
+        )
+
+    def activate_generation(
+        self,
+        generation_id: str,
+        *,
+        expected_revision: int,
+        actor: str,
+        reason: str,
+    ) -> GenerationChangeReceipt:
+        return self._change_generation(
+            kind="activate",
+            generation_id=generation_id,
+            expected_revision=expected_revision,
+            actor=actor,
+            reason=reason,
+        )
+
+    def pause_generation(
+        self, *, expected_revision: int, actor: str
+    ) -> GenerationChangeReceipt:
+        if not actor:
+            raise ValueError("generation actor is required")
+        with self._transaction() as connection:
+            state = connection.execute(
+                "SELECT * FROM generation_state WHERE singleton = 1"
+            ).fetchone()
+            if (
+                state is None
+                or state["revision"] != expected_revision
+                or state["claims_paused"]
+            ):
+                raise PermissionError("generation routing revision changed")
+            manifest = connection.execute(
+                "SELECT manifest_digest FROM generation_manifests WHERE generation_id = ?",
+                (state["active_generation_id"],),
+            ).fetchone()
+            receipt = GenerationChangeReceipt(
+                tenant=self.tenant,
+                kind="pause",
+                from_generation_id=cast(str, state["active_generation_id"]),
+                to_generation_id=cast(str, state["active_generation_id"]),
+                prior_revision=expected_revision,
+                resulting_revision=expected_revision + 1,
+                manifest_digest=cast(str, manifest["manifest_digest"]),
+            )
+            connection.execute(
+                "UPDATE generation_state SET claims_paused = 1, revision = ?, updated_at_us = ? "
+                "WHERE singleton = 1 AND revision = ?",
+                (receipt.resulting_revision, self._clock_us(), expected_revision),
+            )
+            self._record_generation_change(connection, receipt, actor, "pause")
+        return receipt
+
+    def resume_generation(
+        self, *, expected_revision: int, actor: str
+    ) -> GenerationChangeReceipt:
+        if not actor:
+            raise ValueError("generation actor is required")
+        with self._transaction() as connection:
+            state = connection.execute(
+                "SELECT * FROM generation_state WHERE singleton = 1"
+            ).fetchone()
+            if (
+                state is None
+                or state["revision"] != expected_revision
+                or not state["claims_paused"]
+            ):
+                raise PermissionError("generation cannot resume at this revision")
+            manifest = connection.execute(
+                "SELECT manifest_digest FROM generation_manifests WHERE generation_id = ?",
+                (state["active_generation_id"],),
+            ).fetchone()
+            receipt = GenerationChangeReceipt(
+                tenant=self.tenant,
+                kind="resume",
+                from_generation_id=cast(str, state["active_generation_id"]),
+                to_generation_id=cast(str, state["active_generation_id"]),
+                prior_revision=expected_revision,
+                resulting_revision=expected_revision + 1,
+                manifest_digest=cast(str, manifest["manifest_digest"]),
+            )
+            connection.execute(
+                "UPDATE generation_state SET claims_paused = 0, revision = ?, "
+                "updated_at_us = ? WHERE singleton = 1 AND revision = ?",
+                (receipt.resulting_revision, self._clock_us(), expected_revision),
+            )
+            self._record_generation_change(connection, receipt, actor, "resume")
+        return receipt
+
+    def rollback_generation(
+        self,
+        *,
+        expected_revision: int,
+        actor: str,
+        reason: str,
+    ) -> GenerationChangeReceipt:
+        with self._connect() as connection:
+            state = connection.execute(
+                "SELECT previous_generation_id FROM generation_state WHERE singleton = 1"
+            ).fetchone()
+        if state is None or state["previous_generation_id"] is None:
+            raise ValueError("no previous generation is available for rollback")
+        return self._change_generation(
+            kind="rollback",
+            generation_id=cast(str, state["previous_generation_id"]),
+            expected_revision=expected_revision,
+            actor=actor,
+            reason=reason,
+        )
+
+    def _change_generation(
+        self,
+        *,
+        kind: str,
+        generation_id: str,
+        expected_revision: int,
+        actor: str,
+        reason: str,
+    ) -> GenerationChangeReceipt:
+        if not actor or not reason:
+            raise ValueError("generation actor and reason are required")
+        with self._transaction() as connection:
+            candidate = connection.execute(
+                "SELECT * FROM generation_manifests WHERE generation_id = ?",
+                (generation_id,),
+            ).fetchone()
+            allowed_states = {"verified"} if kind == "activate" else {"retired"}
+            if candidate is None or candidate["state"] not in allowed_states:
+                raise ValueError("generation is not verified for activation")
+            state = connection.execute(
+                "SELECT * FROM generation_state WHERE singleton = 1"
+            ).fetchone()
+            if state is None:
+                prior_revision = 0
+                if expected_revision != 0 or kind != "activate":
+                    raise PermissionError("generation bootstrap revision is invalid")
+                nonterminal = tuple(status.value for status in JobStatus if not status.terminal)
+                placeholders = ",".join("?" for _ in nonterminal)
+                generations = {
+                    cast(str, row[0])
+                    for row in connection.execute(
+                        f"SELECT DISTINCT corpus_generation FROM jobs "
+                        f"WHERE status IN ({placeholders})",
+                        nonterminal,
+                    ).fetchall()
+                }
+                if generations and generations != {generation_id}:
+                    raise PermissionError(
+                        "generation bootstrap does not cover existing nonterminal jobs"
+                    )
+                prior = None
+                change_kind = "bootstrap"
+                connection.execute(
+                    "INSERT INTO generation_state VALUES (1, ?, NULL, 1, 0, ?)",
+                    (generation_id, self._clock_us()),
+                )
+            else:
+                if state["revision"] != expected_revision:
+                    raise PermissionError("generation routing revision changed")
+                prior_revision = expected_revision
+                prior = cast(str, state["active_generation_id"])
+                change_kind = kind
+                if not state["claims_paused"]:
+                    raise PermissionError("generation cutover requires paused claims")
+                if kind == "rollback" and generation_id != state["previous_generation_id"]:
+                    raise PermissionError("rollback target is not the immediate predecessor")
+                if kind == "activate" and candidate["parent_generation_id"] != prior:
+                    raise PermissionError("candidate parent is not the active generation")
+                leased = connection.execute(
+                    "SELECT COUNT(*) FROM leases l JOIN jobs USING(job_id) "
+                    "WHERE jobs.corpus_generation IN (?, ?) AND l.owner_id IS NOT NULL "
+                    "AND l.expires_at_us > ?",
+                    (prior, generation_id, self._clock_us()),
+                ).fetchone()[0]
+                if leased:
+                    raise PermissionError("generation cutover requires drained leases")
+                active_statuses = tuple(
+                    status.value
+                    for status in _ACQUISITION_ACTIVE
+                )
+                placeholders = ",".join("?" for _ in active_statuses)
+                unfinished = connection.execute(
+                    f"SELECT COUNT(*) FROM jobs WHERE corpus_generation = ? "
+                    f"AND status IN ({placeholders})",
+                    (prior, *active_statuses),
+                ).fetchone()[0]
+                if unfinished:
+                    raise PermissionError(
+                        "generation cutover requires all predecessor jobs to be terminal"
+                    )
+                finalization_unfinished = connection.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE corpus_generation = ? "
+                    "AND status IN ('ready','answering','notifying')",
+                    (prior,),
+                ).fetchone()[0]
+                if finalization_unfinished:
+                    raise PermissionError(
+                        "generation cutover requires predecessor finalization to be terminal"
+                    )
+                candidate_active = connection.execute(
+                    f"SELECT COUNT(*) FROM jobs WHERE corpus_generation = ? "
+                    f"AND status IN ({placeholders})",
+                    (generation_id, *active_statuses),
+                ).fetchone()[0]
+                if candidate_active:
+                    raise PermissionError(
+                        "generation cutover requires candidate jobs to be terminal"
+                    )
+                connection.execute(
+                    "UPDATE generation_state SET active_generation_id = ?, "
+                    "previous_generation_id = ?, revision = ?, claims_paused = 1, "
+                    "updated_at_us = ? WHERE singleton = 1 AND revision = ?",
+                    (
+                        generation_id,
+                        prior,
+                        expected_revision + 1,
+                        self._clock_us(),
+                        expected_revision,
+                    ),
+                )
+                connection.execute(
+                    "UPDATE generation_manifests SET state = 'retired' "
+                    "WHERE generation_id = ?",
+                    (prior,),
+                )
+            connection.execute(
+                "UPDATE generation_manifests SET state = 'active', activated_at_us = ? "
+                "WHERE generation_id = ?",
+                (self._clock_us(), generation_id),
+            )
+            receipt = GenerationChangeReceipt(
+                tenant=self.tenant,
+                kind=change_kind,
+                from_generation_id=prior,
+                to_generation_id=generation_id,
+                prior_revision=prior_revision,
+                resulting_revision=prior_revision + 1,
+                manifest_digest=cast(str, candidate["manifest_digest"]),
+            )
+            self._record_generation_change(connection, receipt, actor, reason)
+            if kind == "rollback" and prior is not None:
+                connection.execute(
+                    "UPDATE generation_manifests SET state = 'rolled_back' "
+                    "WHERE generation_id = ?",
+                    (prior,),
+                )
+        return receipt
+
+    def _record_generation_change(
+        self,
+        connection: sqlite3.Connection,
+        receipt: GenerationChangeReceipt,
+        actor: str,
+        reason: str,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO generation_changes "
+            "(change_id, kind, from_generation_id, to_generation_id, prior_revision, "
+            "resulting_revision, actor, reason_digest, manifest_digest, changed_at_us) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                receipt.change_id,
+                receipt.kind,
+                receipt.from_generation_id,
+                receipt.to_generation_id,
+                receipt.prior_revision,
+                receipt.resulting_revision,
+                actor,
+                hashlib.sha256(reason.encode()).hexdigest(),
+                receipt.manifest_digest,
+                self._clock_us(),
+            ),
+        )
+
     def complete_notification(
         self, lease: JobLease, receipt_json: str
     ) -> AcquisitionJob:
@@ -990,6 +1496,21 @@ class SQLiteTenantStore:
                 )
             ):
                 raise ValueError("prepared ingest does not match its durable job")
+            manifest = connection.execute(
+                "SELECT manifest_json FROM generation_manifests WHERE generation_id = ?",
+                (command.corpus_generation,),
+            ).fetchone()
+            if manifest is not None:
+                manifest_value = json.loads(cast(str, manifest["manifest_json"]))
+                chunks = {item.chunk.chunk_id for item in command.chunks}
+                if (
+                    command.idempotency_key
+                    not in set(manifest_value["ingest_idempotency_keys"])
+                    or not chunks <= set(manifest_value["chunk_ids"])
+                ):
+                    raise PermissionError(
+                        "prepared ingest is outside the generation manifest inventory"
+                    )
             from celiums_rezero.knowledge.acquisition import validate_embedded_chunks
 
             validate_embedded_chunks(
@@ -1222,7 +1743,9 @@ class SQLiteTenantStore:
                     "WHERE name IN "
                     "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
                     "'answer_retries','finalization_dead_letters','jobs_status_created',"
-                    "'notification_due','answer_retry_due','finalization_dead_lettered') "
+                    "'notification_due','answer_retry_due','finalization_dead_lettered',"
+                    "'generation_manifests','generation_manifest_state','generation_state',"
+                    "'generation_changes') "
                     "ORDER BY type, name"
                 ).fetchall()
                 schema_digest = hashlib.sha256(
@@ -1282,7 +1805,7 @@ class SQLiteTenantStore:
             if row is None or row["tenant_id"] != self.tenant.value:
                 raise PermissionError("SQLite database belongs to another tenant")
             version = int(row["schema_version"])
-            if version not in {1, 2, _SCHEMA_VERSION}:
+            if version not in {1, 2, 3, _SCHEMA_VERSION}:
                 raise PermissionError("SQLite database schema version is unsupported")
             required = {
                 "tenant_meta",
@@ -1292,8 +1815,12 @@ class SQLiteTenantStore:
             }
             if version >= 2:
                 required.add("notification_outbox")
-            if version == _SCHEMA_VERSION:
+            if version >= 3:
                 required.update({"answer_retries", "finalization_dead_letters"})
+            if version == _SCHEMA_VERSION:
+                required.update(
+                    {"generation_manifests", "generation_state", "generation_changes"}
+                )
             if tables != required:
                 raise PermissionError("SQLite database is not a recognized tenant authority")
             forbidden = connection.execute(
@@ -1344,7 +1871,7 @@ class SQLiteTenantStore:
                     "receipt_digest",
                     "delivered_at_us",
                 }
-            if version == _SCHEMA_VERSION:
+            if version >= 3:
                 expected_columns["answer_retries"] = {
                     "job_id",
                     "failures",
@@ -1360,6 +1887,40 @@ class SQLiteTenantStore:
                     "error",
                     "dead_lettered_at_us",
                 }
+            if version == _SCHEMA_VERSION:
+                expected_columns["generation_manifests"] = {
+                    "generation_id",
+                    "backend_id",
+                    "collection_id",
+                    "vector_target",
+                    "parent_generation_id",
+                    "manifest_digest",
+                    "manifest_json",
+                    "state",
+                    "created_at_us",
+                    "verified_at_us",
+                    "activated_at_us",
+                }
+                expected_columns["generation_state"] = {
+                    "singleton",
+                    "active_generation_id",
+                    "previous_generation_id",
+                    "revision",
+                    "claims_paused",
+                    "updated_at_us",
+                }
+                expected_columns["generation_changes"] = {
+                    "change_id",
+                    "kind",
+                    "from_generation_id",
+                    "to_generation_id",
+                    "prior_revision",
+                    "resulting_revision",
+                    "actor",
+                    "reason_digest",
+                    "manifest_digest",
+                    "changed_at_us",
+                }
             for table, columns in expected_columns.items():
                 info = connection.execute(f"PRAGMA table_info({table})").fetchall()
                 observed = {cast(str, row[1]) for row in info}
@@ -1374,7 +1935,19 @@ class SQLiteTenantStore:
                 if version >= 2
                 else (object(),)
             )
-            if not foreign_keys or not outbox_keys or not notification_keys:
+            generation_keys = (
+                connection.execute(
+                    "PRAGMA foreign_key_list(generation_state)"
+                ).fetchall()
+                if version == _SCHEMA_VERSION
+                else (object(),)
+            )
+            if (
+                not foreign_keys
+                or not outbox_keys
+                or not notification_keys
+                or not generation_keys
+            ):
                 raise PermissionError("SQLite tenant schema foreign keys are incompatible")
             indexes = {
                 cast(str, row[0])
@@ -1386,20 +1959,30 @@ class SQLiteTenantStore:
             expected_indexes = {"jobs_status_created"}
             if version >= 2:
                 expected_indexes.add("notification_due")
-            if version == _SCHEMA_VERSION:
+            if version >= 3:
                 expected_indexes.update({"answer_retry_due", "finalization_dead_lettered"})
+            if version == _SCHEMA_VERSION:
+                expected_indexes.add("generation_manifest_state")
             if indexes != expected_indexes:
                 raise PermissionError("SQLite tenant schema indexes are incompatible")
             names = (
                 "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
                 "'answer_retries','finalization_dead_letters','jobs_status_created',"
-                "'notification_due','answer_retry_due','finalization_dead_lettered')"
+                "'notification_due','answer_retry_due','finalization_dead_lettered',"
+                "'generation_manifests','generation_manifest_state','generation_state',"
+                "'generation_changes')"
                 if version == _SCHEMA_VERSION
+                else (
+                "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+                "'answer_retries','finalization_dead_letters','jobs_status_created',"
+                "'notification_due','answer_retry_due','finalization_dead_lettered')"
+                if version == 3
                 else (
                 "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
                 "'jobs_status_created','notification_due')"
                 if version == 2
                 else "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created')"
+                )
                 )
             )
             schema_rows = connection.execute(
@@ -1412,6 +1995,7 @@ class SQLiteTenantStore:
             expected_digest = {
                 1: _EXPECTED_SCHEMA_V1_DIGEST,
                 2: _EXPECTED_SCHEMA_V2_DIGEST,
+                3: _EXPECTED_SCHEMA_V3_DIGEST,
                 _SCHEMA_VERSION: _EXPECTED_SCHEMA_DIGEST,
             }[version]
             if schema_digest != expected_digest:
@@ -1472,9 +2056,22 @@ class SQLiteTenantStore:
                     connection.execute(_ANSWER_RETRY_INDEX_SQL)
                     connection.execute(_DEAD_LETTER_TABLE_SQL)
                     connection.execute(_DEAD_LETTER_INDEX_SQL)
+                    version = 3
+                if version == 3:
+                    objects = {
+                        (cast(str, row[0]), cast(str, row[1]))
+                        for row in connection.execute(
+                            "SELECT type, name FROM sqlite_master "
+                            "WHERE name NOT LIKE 'sqlite_%'"
+                        ).fetchall()
+                    }
+                    if objects != _EXPECTED_SCHEMA_V3_OBJECTS:
+                        raise RuntimeError("SQLite v3 schema changed before migration")
+                    for statement in _GENERATION_STATEMENTS:
+                        connection.execute(statement)
                     connection.execute(
                         "UPDATE tenant_meta SET schema_version = ? "
-                        "WHERE singleton = 1 AND schema_version IN (1, 2)",
+                        "WHERE singleton = 1 AND schema_version IN (1, 2, 3)",
                         (_SCHEMA_VERSION,),
                     )
                 elif version != _SCHEMA_VERSION:
@@ -1499,14 +2096,16 @@ class SQLiteTenantStore:
                 "WHERE name IN "
                 "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
                 "'answer_retries','finalization_dead_letters','jobs_status_created',"
-                "'notification_due','answer_retry_due','finalization_dead_lettered') "
+                "'notification_due','answer_retry_due','finalization_dead_lettered',"
+                "'generation_manifests','generation_manifest_state','generation_state',"
+                "'generation_changes') "
                 "ORDER BY type, name"
             ).fetchall()
             digest = hashlib.sha256(
                 canonical_json([tuple(row) for row in rows]).encode()
             ).hexdigest()
             if digest != _EXPECTED_SCHEMA_DIGEST:
-                raise RuntimeError("SQLite v3 schema migration digest is invalid")
+                raise RuntimeError("SQLite v4 schema migration digest is invalid")
 
     @staticmethod
     def _check_integrity(connection: sqlite3.Connection) -> None:
@@ -2056,9 +2655,58 @@ _FINALIZATION_OPERATIONS_SCHEMA = (
     + ";"
 )
 
+_GENERATION_STATEMENTS = (
+    """
+    CREATE TABLE generation_manifests (
+        generation_id TEXT PRIMARY KEY,
+        backend_id TEXT NOT NULL,
+        collection_id INTEGER NOT NULL,
+        vector_target TEXT NOT NULL,
+        parent_generation_id TEXT,
+        manifest_digest TEXT NOT NULL UNIQUE,
+        manifest_json TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+            state IN ('building','verified','active','retired','rolled_back')
+        ),
+        created_at_us INTEGER NOT NULL,
+        verified_at_us INTEGER,
+        activated_at_us INTEGER,
+        FOREIGN KEY(parent_generation_id) REFERENCES generation_manifests(generation_id)
+    )
+    """,
+    "CREATE INDEX generation_manifest_state ON generation_manifests(state, generation_id)",
+    """
+    CREATE TABLE generation_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        active_generation_id TEXT NOT NULL REFERENCES generation_manifests(generation_id),
+        previous_generation_id TEXT REFERENCES generation_manifests(generation_id),
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        claims_paused INTEGER NOT NULL CHECK (claims_paused IN (0, 1)),
+        updated_at_us INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE generation_changes (
+        change_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        from_generation_id TEXT,
+        to_generation_id TEXT NOT NULL,
+        prior_revision INTEGER NOT NULL,
+        resulting_revision INTEGER NOT NULL UNIQUE,
+        actor TEXT NOT NULL,
+        reason_digest TEXT NOT NULL,
+        manifest_digest TEXT NOT NULL,
+        changed_at_us INTEGER NOT NULL
+    )
+    """,
+)
+
+_GENERATION_SCHEMA = ";".join(statement.strip() for statement in _GENERATION_STATEMENTS) + ";"
+
 _SCHEMA_V1 = _SCHEMA
 _SCHEMA_V2 = _SCHEMA_V1 + _NOTIFICATION_SCHEMA
-_SCHEMA = _SCHEMA_V2 + _FINALIZATION_OPERATIONS_SCHEMA
+_SCHEMA_V3 = _SCHEMA_V2 + _FINALIZATION_OPERATIONS_SCHEMA
+_SCHEMA = _SCHEMA_V3 + _GENERATION_SCHEMA
 
 def _expected_schema_digest() -> str:
     connection = sqlite3.connect(":memory:")
@@ -2069,7 +2717,8 @@ def _expected_schema_digest() -> str:
             "WHERE name IN ('tenant_meta','jobs','leases','ingest_outbox',"
             "'notification_outbox','answer_retries','finalization_dead_letters',"
             "'jobs_status_created','notification_due','answer_retry_due',"
-            "'finalization_dead_lettered') "
+            "'finalization_dead_lettered','generation_manifests',"
+            "'generation_manifest_state','generation_state','generation_changes') "
             "ORDER BY type, name"
         ).fetchall()
         return hashlib.sha256(canonical_json([tuple(row) for row in rows]).encode()).hexdigest()
@@ -2100,6 +2749,12 @@ _EXPECTED_SCHEMA_V2_DIGEST = _schema_digest(
     "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
     "'jobs_status_created','notification_due')",
 )
+_EXPECTED_SCHEMA_V3_DIGEST = _schema_digest(
+    _SCHEMA_V3,
+    "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+    "'answer_retries','finalization_dead_letters','jobs_status_created',"
+    "'notification_due','answer_retry_due','finalization_dead_lettered')",
+)
 _EXPECTED_SCHEMA_OBJECTS = {
     ("table", "tenant_meta"),
     ("table", "jobs"),
@@ -2112,6 +2767,10 @@ _EXPECTED_SCHEMA_OBJECTS = {
     ("index", "answer_retry_due"),
     ("table", "finalization_dead_letters"),
     ("index", "finalization_dead_lettered"),
+    ("table", "generation_manifests"),
+    ("index", "generation_manifest_state"),
+    ("table", "generation_state"),
+    ("table", "generation_changes"),
 }
 _EXPECTED_SCHEMA_V1_OBJECTS = {
     ("table", "tenant_meta"),
@@ -2126,6 +2785,19 @@ _EXPECTED_SCHEMA_V2_OBJECTS = {
     ("table", "leases"),
     ("table", "ingest_outbox"),
     ("table", "notification_outbox"),
+    ("index", "jobs_status_created"),
+    ("index", "notification_due"),
+}
+_EXPECTED_SCHEMA_V3_OBJECTS = {
+    ("table", "tenant_meta"),
+    ("table", "jobs"),
+    ("table", "leases"),
+    ("table", "ingest_outbox"),
+    ("table", "notification_outbox"),
+    ("table", "answer_retries"),
+    ("index", "answer_retry_due"),
+    ("table", "finalization_dead_letters"),
+    ("index", "finalization_dead_lettered"),
     ("index", "jobs_status_created"),
     ("index", "notification_due"),
 }

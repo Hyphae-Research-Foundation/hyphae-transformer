@@ -35,6 +35,7 @@ dev = [
 
 [project.scripts]
 celiums-rezero = "celiums_rezero.cli:main"
+celiums-knowledge = "celiums_rezero.knowledge.cli:main"
 
 [project.urls]
 Repository = "https://github.com/celiumsai/celiums-rezero"

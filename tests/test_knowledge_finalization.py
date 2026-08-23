@@ -378,7 +378,7 @@ def test_schema_v1_migrates_notification_outbox(tmp_path: Path) -> None:
         table = reopened.execute(
             "SELECT name FROM sqlite_master WHERE name = 'notification_outbox'"
         ).fetchone()
-    assert version == 3 and table is not None
+    assert version == 4 and table is not None
 
 
 def test_schema_v2_migrates_operational_tables(tmp_path: Path) -> None:
@@ -407,7 +407,7 @@ def test_schema_v2_migrates_operational_tables(tmp_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         }
-    assert version == 3
+    assert version == 4
     assert {"answer_retries", "finalization_dead_letters"}.issubset(tables)
 
 

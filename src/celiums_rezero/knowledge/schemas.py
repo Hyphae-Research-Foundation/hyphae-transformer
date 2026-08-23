@@ -88,6 +88,14 @@ class DeadLetterReason(StrEnum):
     RETRIES_EXHAUSTED = "retries_exhausted"
 
 
+class GenerationState(StrEnum):
+    BUILDING = "building"
+    VERIFIED = "verified"
+    ACTIVE = "active"
+    RETIRED = "retired"
+    ROLLED_BACK = "rolled_back"
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceHit:
     handle: str
@@ -395,6 +403,109 @@ class PublicationTarget:
             raise ValueError("publication backend ID must be lowercase SHA-256")
         if self.collection < 1 or not self.vector_target or len(self.vector_target) > 128:
             raise ValueError("publication target is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationManifest:
+    tenant: TenantId
+    generation_id: str
+    target: PublicationTarget
+    parent_generation_id: str | None
+    chunk_ids: tuple[str, ...]
+    ingest_idempotency_keys: tuple[str, ...]
+    ingest_receipt_digests: tuple[str, ...]
+    manifest_digest: str | None = None
+    verification_token: str | None = None
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"generation[-_][0-9A-Za-z._:-]{1,127}", self.generation_id):
+            raise ValueError("generation ID is invalid")
+        if self.parent_generation_id is not None and not re.fullmatch(
+            r"generation[-_][0-9A-Za-z._:-]{1,127}", self.parent_generation_id
+        ):
+            raise ValueError("parent generation ID is invalid")
+        if not self.chunk_ids or len(self.chunk_ids) != len(set(self.chunk_ids)):
+            raise ValueError("generation chunks must be nonempty and unique")
+        if not self.ingest_idempotency_keys or any(
+            not re.fullmatch(r"[0-9a-f]{64}", key)
+            for key in self.ingest_idempotency_keys
+        ):
+            raise ValueError("generation ingest identities are invalid")
+        if len(self.ingest_receipt_digests) != len(
+            set(self.ingest_receipt_digests)
+        ) or any(
+            not re.fullmatch(r"[0-9a-f]{64}", digest)
+            for digest in self.ingest_receipt_digests
+        ):
+            raise ValueError("generation receipt digests are invalid")
+        expected = content_hash(
+            {
+                "schema": "knowledge-generation-manifest-v1",
+                "tenant": self.tenant.value,
+                "generation_id": self.generation_id,
+                "target": self.target,
+                "parent_generation_id": self.parent_generation_id,
+                "chunk_ids": self.chunk_ids,
+                "ingest_idempotency_keys": self.ingest_idempotency_keys,
+                "ingest_receipt_digests": self.ingest_receipt_digests,
+            },
+            length=64,
+        )
+        if self.manifest_digest is None:
+            object.__setattr__(self, "manifest_digest", expected)
+        elif self.manifest_digest != expected:
+            raise ValueError("generation manifest digest does not match its contents")
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationSnapshot:
+    tenant: TenantId
+    generation_id: str
+    target: PublicationTarget
+    manifest_digest: str
+    revision: int
+    claims_paused: bool = False
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"generation[-_][0-9A-Za-z._:-]{1,127}", self.generation_id):
+            raise ValueError("generation snapshot ID is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.manifest_digest) or self.revision < 1:
+            raise ValueError("generation snapshot digest or revision is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationChangeReceipt:
+    tenant: TenantId
+    kind: str
+    from_generation_id: str | None
+    to_generation_id: str
+    prior_revision: int
+    resulting_revision: int
+    manifest_digest: str
+    change_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"bootstrap", "activate", "pause", "resume", "rollback"}:
+            raise ValueError("generation change kind is invalid")
+        if self.prior_revision < 0 or self.resulting_revision != self.prior_revision + 1:
+            raise ValueError("generation change revision is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.manifest_digest):
+            raise ValueError("generation change manifest digest is invalid")
+        identity = {
+            "schema": "knowledge-generation-change-v1",
+            "tenant": self.tenant.value,
+            "kind": self.kind,
+            "from": self.from_generation_id,
+            "to": self.to_generation_id,
+            "prior_revision": self.prior_revision,
+            "resulting_revision": self.resulting_revision,
+            "manifest_digest": self.manifest_digest,
+        }
+        expected = f"change_{content_hash(identity, length=64)}"
+        if self.change_id is None:
+            object.__setattr__(self, "change_id", expected)
+        elif self.change_id != expected:
+            raise ValueError("generation change ID does not match its contents")
 
 
 @dataclass(frozen=True, slots=True)
