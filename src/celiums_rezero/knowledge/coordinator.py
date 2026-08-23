@@ -17,7 +17,7 @@ from celiums_rezero.knowledge.schemas import (
     SufficiencyPolicy,
     TenantId,
 )
-from celiums_rezero.knowledge.store import InMemoryTenantStore
+from celiums_rezero.knowledge.store import JobStore
 
 
 class KnowledgeRetriever(Protocol):
@@ -30,7 +30,7 @@ class KnowledgeCoordinator:
         *,
         sufficiency: SufficiencyPolicy,
         acquisition: AcquisitionPolicy,
-        store: InMemoryTenantStore,
+        store: JobStore,
         embedding_profile: str,
     ) -> None:
         if not embedding_profile:
@@ -82,12 +82,6 @@ class KnowledgeCoordinator:
                 ),
                 decision=decision,
             )
-        if self.store.active_count(tenant) >= self.acquisition.max_active_jobs:
-            return KnowledgeResponse(
-                status="quota_exceeded",
-                answer="No poseo este conocimiento y la cuota de adquisicion esta agotada.",
-                decision=decision,
-            )
         job = AcquisitionJob(
             tenant=tenant,
             query=normalized,
@@ -97,7 +91,18 @@ class KnowledgeCoordinator:
             embedding_profile=self.embedding_profile,
             source_id=source_id,
         )
-        queued, deduplicated = self.store.enqueue(job)
+        result = self.store.enqueue_bounded(
+            job,
+            max_active_jobs=self.acquisition.max_active_jobs,
+            max_jobs_per_day=self.acquisition.max_jobs_per_day,
+        )
+        if result is None:
+            return KnowledgeResponse(
+                status="quota_exceeded",
+                answer="No poseo este conocimiento y la cuota de adquisicion esta agotada.",
+                decision=decision,
+            )
+        queued, deduplicated = result
         return KnowledgeResponse(
             status="knowledge_pending",
             answer=NO_KNOWLEDGE_MESSAGE,

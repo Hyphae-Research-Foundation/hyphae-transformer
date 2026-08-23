@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, replace
+from typing import Protocol, cast
 
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
 from celiums_rezero.knowledge.schemas import (
@@ -12,8 +12,10 @@ from celiums_rezero.knowledge.schemas import (
     EmbeddedChunk,
     IngestMode,
     IngestReceipt,
+    JobLease,
     JobStatus,
     KnowledgeChunk,
+    PreparedIngest,
     PublicationAuthorization,
     PublicationTarget,
     SourceArtifact,
@@ -78,6 +80,44 @@ class PublicationAuthorizer(Protocol):
         idempotency_key: str,
         target: PublicationTarget,
     ) -> PublicationAuthorization: ...
+
+
+class DurableJobStore(Protocol):
+    def claim(
+        self,
+        *,
+        owner_id: str,
+        lease_seconds: float,
+        job_id: str | None = None,
+    ) -> tuple[AcquisitionJob, JobLease] | None: ...
+
+    def renew(self, lease: JobLease, *, lease_seconds: float) -> JobLease: ...
+
+    def transition_leased(
+        self,
+        lease: JobLease,
+        status: JobStatus,
+        *,
+        failure: str | None = None,
+    ) -> AcquisitionJob: ...
+
+    def stage_ingest(self, lease: JobLease, command: PreparedIngest) -> None: ...
+
+    def prepared_ingest(self, tenant: TenantId, job_id: str) -> PreparedIngest | None: ...
+
+    def record_ingest_receipt(self, lease: JobLease, receipt_json: str) -> None: ...
+
+    def ingest_receipt_json(self, tenant: TenantId, job_id: str) -> str | None: ...
+
+    def release(self, lease: JobLease) -> None: ...
+
+    def complete_verification(
+        self,
+        lease: JobLease,
+        *,
+        receipt_json: str,
+        status: JobStatus,
+    ) -> AcquisitionJob: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +304,270 @@ class AcquisitionWorker:
         assert answering.status is JobStatus.ANSWERING
         self.coordinator.store.transition(tenant, job_id, JobStatus.NOTIFYING)
         return self.coordinator.store.transition(tenant, job_id, JobStatus.COMPLETED)
+
+
+class DurableAcquisitionWorker(AcquisitionWorker):
+    """Lease-fenced worker that stages exact ingest input before external publication."""
+
+    def __init__(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: float,
+        coordinator: KnowledgeCoordinator,
+        connector: SourceConnector,
+        embedder: ChunkEmbedder,
+        ingestor: KnowledgeIngestor,
+        verifier: IngestVerifier,
+        chunking: ChunkingPolicy | None = None,
+        validator: ArtifactValidator | None = None,
+        authorizer: PublicationAuthorizer | None = None,
+    ) -> None:
+        super().__init__(
+            coordinator=coordinator,
+            connector=connector,
+            embedder=embedder,
+            ingestor=ingestor,
+            verifier=verifier,
+            chunking=chunking,
+            validator=validator,
+            authorizer=authorizer,
+        )
+        if not worker_id or lease_seconds <= 0:
+            raise ValueError("durable worker ID and lease duration are required")
+        self.worker_id = worker_id
+        self.lease_seconds = lease_seconds
+
+    def run_next(self, *, job_id: str | None = None) -> AcquisitionOutcome | None:
+        store = cast(DurableJobStore, self.coordinator.store)
+        required = (
+            "claim",
+            "renew",
+            "transition_leased",
+            "stage_ingest",
+            "prepared_ingest",
+            "record_ingest_receipt",
+            "ingest_receipt_json",
+            "release",
+        )
+        if any(not hasattr(store, name) for name in required):
+            raise TypeError("durable worker requires a lease and outbox-capable store")
+        claimed = store.claim(
+            owner_id=self.worker_id,
+            lease_seconds=self.lease_seconds,
+            job_id=job_id,
+        )
+        if claimed is None:
+            return None
+        job, lease = claimed
+        try:
+            if job.status is JobStatus.ACQUIRING:
+                return self._prepare_and_dispatch(job, lease)
+            if job.status is JobStatus.INGESTING:
+                return self._dispatch_prepared(job, lease)
+            if job.status is JobStatus.VERIFYING:
+                return self._verify_prepared(job, lease)
+            raise AcquisitionError(f"durable worker cannot resume {job.status}")
+        except Exception as error:
+            current = self.coordinator.job_status(job.tenant, cast(str, job.job_id))
+            assert current is not None
+            if current.status.terminal:
+                return AcquisitionOutcome(current, "")
+            if current.status in {JobStatus.INGESTING, JobStatus.VERIFYING}:
+                return AcquisitionOutcome(
+                    replace(
+                        current,
+                        failure=f"retryable {type(error).__name__}: {error}",
+                    ),
+                    "",
+                )
+            status = (
+                JobStatus.SECURITY_REJECTED
+                if current.status
+                in {JobStatus.ACQUIRING, JobStatus.QUARANTINED, JobStatus.VALIDATING}
+                and isinstance(error, SecurityRejection)
+                else JobStatus.FAILED
+            )
+            try:
+                failed = store.transition_leased(
+                    lease,
+                    status,
+                    failure=f"{type(error).__name__}: {error}",
+                )
+            except PermissionError:
+                latest = self.coordinator.job_status(job.tenant, cast(str, job.job_id))
+                assert latest is not None
+                return AcquisitionOutcome(latest, "")
+            return AcquisitionOutcome(failed, "")
+
+    def finalize(
+        self,
+        tenant: TenantId,
+        job_id: str,
+        *,
+        evidence_sufficient: bool,
+    ) -> AcquisitionJob:
+        del tenant, job_id, evidence_sufficient
+        raise NotImplementedError(
+            "durable answer and notification finalization requires a separate outbox"
+        )
+
+    def _prepare_and_dispatch(
+        self, job: AcquisitionJob, lease: JobLease
+    ) -> AcquisitionOutcome:
+        store = cast(DurableJobStore, self.coordinator.store)
+        job_id = cast(str, job.job_id)
+        source_policy = self.coordinator.acquisition.source(job.source_id)
+        if source_policy is None or job.policy_version != self.coordinator.acquisition.version:
+            denied = store.transition_leased(
+                lease,
+                JobStatus.POLICY_DENIED,
+                failure="source or policy version is not allowlisted",
+            )
+            return AcquisitionOutcome(denied, "")
+        if job.embedding_profile != self.embedder.profile:
+            raise AcquisitionError("job embedding profile does not match the worker")
+        mode = self.ingestor.mode
+        target = self.ingestor.target
+        if not isinstance(mode, IngestMode):
+            raise AcquisitionError("ingestor mode is not a typed contract value")
+        if mode is IngestMode.LIVE and target is None:
+            raise AcquisitionError("live ingestor has no publication target")
+        artifact = self.connector.acquire(job.tenant, job.source_id, job.query)
+        if artifact.tenant != job.tenant or artifact.source_id != job.source_id:
+            raise AcquisitionError("source connector crossed its tenant or source binding")
+        if len(artifact.body) > source_policy.max_download_bytes:
+            raise AcquisitionError("source artifact exceeds its byte budget")
+        if artifact.content_type not in source_policy.allowed_mime_types:
+            raise AcquisitionError("source artifact type is not allowed")
+        store.transition_leased(lease, JobStatus.QUARANTINED)
+        store.transition_leased(lease, JobStatus.VALIDATING)
+        if artifact.license_id not in source_policy.allowed_license_ids:
+            terminal = store.transition_leased(
+                lease,
+                JobStatus.LICENSE_UNKNOWN,
+                failure=f"license is not allowed: {artifact.license_id}",
+            )
+            return AcquisitionOutcome(terminal, artifact.content_digest)
+        validated = (
+            _unvalidated_text_artifact(artifact)
+            if self.validator is None
+            else self.validator.validate(artifact)
+        )
+        store.transition_leased(lease, JobStatus.CHUNKING)
+        chunks = chunk_validated_artifact(validated, self.chunking)
+        store.transition_leased(lease, JobStatus.EMBEDDING)
+        embedded = tuple(
+            EmbeddedChunk(chunk, self.embedder.profile, self.embedder.embed(chunk.text))
+            for chunk in chunks
+        )
+        key = ingest_idempotency_key(job, embedded, self.embedder.profile, target=target)
+        authorization = None
+        if mode is IngestMode.LIVE:
+            if self.validator is None or self.authorizer is None or target is None:
+                raise AcquisitionError(
+                    "live publication requires validation and durable authorization"
+                )
+            authorization = self.authorizer.authorize(
+                job=job,
+                validated=validated,
+                chunks=embedded,
+                idempotency_key=key,
+                target=target,
+            )
+        command = PreparedIngest(
+            tenant=job.tenant,
+            job_id=job_id,
+            corpus_generation=job.corpus_generation,
+            idempotency_key=key,
+            mode=mode,
+            chunks=embedded,
+            authorization=authorization,
+            target=target,
+        )
+        lease = store.renew(lease, lease_seconds=self.lease_seconds)
+        store.stage_ingest(lease, command)
+        return self._dispatch_prepared(
+            replace(job, status=JobStatus.INGESTING), lease, artifact.content_digest
+        )
+
+    def _dispatch_prepared(
+        self, job: AcquisitionJob, lease: JobLease, artifact_digest: str = ""
+    ) -> AcquisitionOutcome:
+        from celiums_rezero.knowledge.publication import encode_ingest_receipt
+
+        store = cast(DurableJobStore, self.coordinator.store)
+        command = store.prepared_ingest(job.tenant, cast(str, job.job_id))
+        if command is None:
+            raise AcquisitionError("ingesting job has no durable outbox")
+        if (
+            command.mode is not self.ingestor.mode
+            or command.target != self.ingestor.target
+            or command.corpus_generation != job.corpus_generation
+            or job.policy_version != self.coordinator.acquisition.version
+            or self.coordinator.acquisition.source(job.source_id) is None
+            or job.embedding_profile != self.embedder.profile
+        ):
+            raise AcquisitionError("durable ingest command does not match current configuration")
+        lease = store.renew(lease, lease_seconds=self.lease_seconds)
+        receipt = self.ingestor.ingest(
+            job.tenant,
+            command.chunks,
+            corpus_generation=command.corpus_generation,
+            idempotency_key=command.idempotency_key,
+            authorization=command.authorization,
+        )
+        store.record_ingest_receipt(lease, encode_ingest_receipt(receipt))
+        return self._verify_prepared(
+            replace(job, status=JobStatus.VERIFYING), lease, artifact_digest
+        )
+
+    def _verify_prepared(
+        self, job: AcquisitionJob, lease: JobLease, artifact_digest: str = ""
+    ) -> AcquisitionOutcome:
+        from celiums_rezero.knowledge.publication import decode_ingest_receipt
+
+        store = cast(DurableJobStore, self.coordinator.store)
+        command = store.prepared_ingest(job.tenant, cast(str, job.job_id))
+        payload = store.ingest_receipt_json(job.tenant, cast(str, job.job_id))
+        if command is None or payload is None:
+            raise AcquisitionError("verifying job has incomplete durable ingest evidence")
+        if (
+            command.mode is not self.ingestor.mode
+            or command.target != self.ingestor.target
+            or command.corpus_generation != job.corpus_generation
+            or job.policy_version != self.coordinator.acquisition.version
+            or self.coordinator.acquisition.source(job.source_id) is None
+            or job.embedding_profile != self.embedder.profile
+        ):
+            raise AcquisitionError("durable verification configuration has drifted")
+        lease = store.renew(lease, lease_seconds=self.lease_seconds)
+        receipt = decode_ingest_receipt(payload)
+        expected = command.chunks
+        first = expected[0].chunk
+        expected_authorization = (
+            None if command.authorization is None else command.authorization.authorization_id
+        )
+        if (
+            receipt.tenant != command.tenant
+            or receipt.source_id != first.source_id
+            or receipt.source_version != first.source_version
+            or receipt.corpus_generation != command.corpus_generation
+            or receipt.chunk_ids != tuple(item.chunk.chunk_id for item in expected)
+            or receipt.idempotency_key != command.idempotency_key
+            or receipt.mode is not command.mode
+            or receipt.target != command.target
+            or receipt.authorization_id != expected_authorization
+        ):
+            raise AcquisitionError("durable ingest receipt does not match its command")
+        if not self.verifier.verify(receipt, expected):
+            raise AcquisitionError("durable ingest evidence failed verification")
+        status = JobStatus.READY if receipt.published else JobStatus.SHADOW_VALIDATED
+        completed = store.complete_verification(
+            lease, receipt_json=payload, status=status
+        )
+        store.release(lease)
+        return AcquisitionOutcome(completed, artifact_digest, receipt)
 
 
 def chunk_artifact(

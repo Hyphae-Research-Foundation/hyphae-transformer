@@ -165,17 +165,39 @@ Live publication now requires all of these host-owned controls in addition to
 
 `publish=False` remains the default and requires no publication authority. Production
 automation remains disabled until deployment supplies an approved scanner backend,
-durable job leases/outbox, atomic corpus-generation cutover and rollback, deletion
-propagation, external audit anchoring, and rate/cost controls. Redirects, compressed
-content, archive parsing, HTML, and PDF remain intentionally unsupported rather than
-silently under-scanned.
+atomic corpus-generation cutover and rollback, deletion propagation, external audit
+anchoring, and rate/cost controls. Redirects, compressed content, archive parsing,
+HTML, and PDF remain intentionally unsupported rather than silently under-scanned.
 
-The durable receipt store closes local replay after a completed write, but does not
-make the in-memory job queue crash-recoverable. A process failure between Hyphae commit
-and local receipt publication requires rerunning the same deterministic ingest against
-the same backend, which Hyphae will suppress by idempotency and return with the original
-commit evidence. Production automation therefore remains blocked until a durable queue
-can recover an `ingesting` job and reconstruct the exact authorized batch.
+## Durable Acquisition Store
+
+`SQLiteTenantStore` now supplies the durable queue boundary for one tenant per database.
+It enables WAL mode, `synchronous=FULL`, foreign keys, a bounded busy timeout, startup
+integrity checks, and a durable tenant/schema binding. Enqueue deduplication and rolling
+24-hour/active quotas execute in one `BEGIN IMMEDIATE` transaction, so concurrent
+workers cannot exceed policy between a count and insert.
+
+Workers claim jobs through expiring leases with monotonically increasing fencing
+tokens. Renewal, state mutation, exact outbox staging, receipt recording, and release
+all require the current unexpired owner and fence. Expired pre-outbox work can be
+requeued explicitly; stale workers cannot mutate local state afterward. Ingesting and
+verifying jobs retain their status because they have deterministic durable recovery
+material.
+
+`DurableAcquisitionWorker` serializes a versioned `PreparedIngest` before any backend
+call. The immutable command includes the tenant/job binding, corpus generation,
+idempotency key, mode, complete ordered chunk text and coordinates, exact hexadecimal
+embedding values, authorization, and publication target. On restart:
+
+- `ingesting` replays that exact command with the same Hyphae idempotency identity;
+- `verifying` adopts the durable typed receipt without reacquiring or re-embedding;
+- an expired earlier phase is deliberately requeued and deterministically rebuilt.
+
+SQLite receipt/outbox digests and strict decoders fail closed on malformed or changed
+state. One database file must remain on a local filesystem with correct WAL shared
+locking; copying only the main file while WAL is active is unsupported. Process-crash
+tests do not prove storage-device power-loss behavior, which remains a deployment
+qualification requirement.
 
 ## Isolated Hyphae Conformance
 

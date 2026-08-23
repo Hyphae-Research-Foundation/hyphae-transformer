@@ -4,6 +4,7 @@ from celiums_rezero.knowledge.acquisition import (
     AcquisitionOutcome,
     AcquisitionWorker,
     ChunkingPolicy,
+    DurableAcquisitionWorker,
     InMemoryKnowledgeIndex,
     InMemorySourceConnector,
     SecurityRejection,
@@ -35,7 +36,7 @@ from celiums_rezero.knowledge.schemas import (
     SufficiencyPolicy,
     TenantId,
 )
-from celiums_rezero.knowledge.store import InMemoryTenantStore
+from celiums_rezero.knowledge.store import InMemoryTenantStore, SQLiteTenantStore
 from celiums_rezero.knowledge.validation import (
     BoundedTextParser,
     StrictArtifactValidator,
@@ -48,6 +49,7 @@ __all__ = [
     "AcquisitionWorker",
     "BoundedTextParser",
     "ChunkingPolicy",
+    "DurableAcquisitionWorker",
     "DurablePublicationAuthorizer",
     "EvidenceBundle",
     "EvidenceHit",
@@ -65,6 +67,7 @@ __all__ = [
     "PublicationReceiptStore",
     "RetrievalConfig",
     "RetrievalContractError",
+    "SQLiteTenantStore",
     "SecurityRejection",
     "StrictArtifactValidator",
     "SufficiencyDecision",
