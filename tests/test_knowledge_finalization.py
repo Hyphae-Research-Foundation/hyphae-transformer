@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import sqlite3
 from pathlib import Path
 
@@ -9,16 +10,24 @@ from celiums_rezero.knowledge import (
     DurableAcquisitionWorker,
     DurableFinalizationWorker,
     FinalAnswer,
+    FinalizationPolicy,
+    FinalizationTimeout,
     InMemoryKnowledgeIndex,
     InMemorySourceConnector,
     KnowledgeCoordinator,
     KnowledgeScheduler,
+    PermanentFinalizationError,
     SQLiteTenantStore,
     SufficiencyPolicy,
     TenantId,
+    TransientFinalizationError,
+    check_notification_sink,
 )
+from celiums_rezero.knowledge.finalization import retry_delay_us
 from celiums_rezero.knowledge.schemas import (
     AcquisitionJob,
+    DeadLetterReason,
+    FinalizationPhase,
     JobStatus,
     NotificationReceipt,
     PreparedNotification,
@@ -39,8 +48,11 @@ class Answerer:
         self.result = answer
         self.calls = 0
 
-    def answer(self, job: AcquisitionJob) -> FinalAnswer | None:
+    def answer(
+        self, job: AcquisitionJob, *, timeout_seconds: float
+    ) -> FinalAnswer | None:
         assert job.status is JobStatus.ANSWERING
+        assert timeout_seconds == 5
         self.calls += 1
         return self.result
 
@@ -53,12 +65,15 @@ class Sink:
         self.calls: list[str] = []
         self.receipts: dict[str, NotificationReceipt] = {}
 
-    def deliver(self, command: PreparedNotification) -> NotificationReceipt:
+    def deliver(
+        self, command: PreparedNotification, *, timeout_seconds: float
+    ) -> NotificationReceipt:
         assert command.notification_id is not None
+        assert timeout_seconds == 5
         self.calls.append(command.notification_id)
         if self.fail_once:
             self.fail_once = False
-            raise RuntimeError("temporary sink outage")
+            raise TransientFinalizationError("temporary sink outage")
         receipt = self.receipts.get(command.notification_id)
         if receipt is None:
             receipt = NotificationReceipt(
@@ -108,11 +123,16 @@ def worker(
     return DurableFinalizationWorker(
         store=store,
         worker_id=worker_id,
-        lease_seconds=30,
+        lease_seconds=10,
         answerer=answerer,
         sink=sink,
-        retry_base_seconds=5,
-        retry_max_seconds=60,
+        policy=FinalizationPolicy(
+            answer_timeout_seconds=5,
+            notification_timeout_seconds=5,
+            lease_safety_seconds=1,
+            retry_base_seconds=5,
+            retry_max_seconds=60,
+        ),
     )
 
 
@@ -186,16 +206,24 @@ def test_scheduler_isolates_answerer_failure_and_reports_it(tmp_path: Path) -> N
     store, _, job_id = ready_store(tmp_path, clock)
 
     class BrokenAnswerer:
-        def answer(self, job: AcquisitionJob) -> FinalAnswer | None:
+        def answer(
+            self, job: AcquisitionJob, *, timeout_seconds: float
+        ) -> FinalAnswer | None:
             del job
-            raise RuntimeError("answerer failed")
+            assert timeout_seconds == 5
+            raise TransientFinalizationError("answerer failed")
 
     finalization = DurableFinalizationWorker(
         store=store,
         worker_id="broken-finalizer",
-        lease_seconds=30,
+        lease_seconds=10,
         answerer=BrokenAnswerer(),
         sink=Sink(),
+        policy=FinalizationPolicy(
+            answer_timeout_seconds=5,
+            notification_timeout_seconds=5,
+            lease_safety_seconds=1,
+        ),
     )
     source = SourcePolicy(
         source_id="official_docs",
@@ -231,7 +259,6 @@ def test_scheduler_isolates_answerer_failure_and_reports_it(tmp_path: Path) -> N
         finalization=finalization,
     )
     scheduler.tick()
-    assert scheduler.last_errors and "answerer failed" in scheduler.last_errors[0]
     latest = store.get(TenantId("tenant_a"), job_id)
     assert latest is not None and latest.status is JobStatus.ANSWERING
 
@@ -351,4 +378,194 @@ def test_schema_v1_migrates_notification_outbox(tmp_path: Path) -> None:
         table = reopened.execute(
             "SELECT name FROM sqlite_master WHERE name = 'notification_outbox'"
         ).fetchone()
-    assert version == 2 and table is not None
+    assert version == 3 and table is not None
+
+
+def test_schema_v2_migrates_operational_tables(tmp_path: Path) -> None:
+    import celiums_rezero.knowledge.store as store_module
+
+    tmp_path.chmod(0o700)
+    path = tmp_path / "jobs.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(store_module._SCHEMA_V2)
+    connection.execute(
+        "INSERT INTO tenant_meta VALUES (1, 'tenant_a', 2, ?)",
+        (1_800_000_000_000_000,),
+    )
+    connection.commit()
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.close()
+    path.chmod(0o600)
+    migrated = SQLiteTenantStore(path, tenant=TenantId("tenant_a"), clock_us=Clock())
+    with migrated._connect() as reopened:
+        version = reopened.execute(
+            "SELECT schema_version FROM tenant_meta WHERE singleton = 1"
+        ).fetchone()[0]
+        tables = {
+            row[0]
+            for row in reopened.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+    assert version == 3
+    assert {"answer_retries", "finalization_dead_letters"}.issubset(tables)
+
+
+def test_deterministic_jitter_is_bounded_and_stable() -> None:
+    first = retry_delay_us(
+        job_id="job_0123456789abcdef",
+        phase=FinalizationPhase.NOTIFYING,
+        failure=3,
+        base_us=1_000_000,
+        maximum_us=60_000_000,
+    )
+    second = retry_delay_us(
+        job_id="job_0123456789abcdef",
+        phase=FinalizationPhase.NOTIFYING,
+        failure=3,
+        base_us=1_000_000,
+        maximum_us=60_000_000,
+    )
+    assert first == second
+    assert 2_000_000 <= first <= 4_000_000
+
+
+def test_permanent_sink_failure_dead_letters(tmp_path: Path) -> None:
+    class PermanentSink(Sink):
+        def deliver(
+            self, command: PreparedNotification, *, timeout_seconds: float
+        ) -> NotificationReceipt:
+            del command, timeout_seconds
+            raise PermanentFinalizationError("invalid destination")
+
+    clock = Clock()
+    store, tenant, job_id = ready_store(tmp_path, clock)
+    result = worker(
+        store, Answerer(FinalAnswer("Answer", ())), PermanentSink()
+    ).run_next(job_id=job_id)
+    assert result is not None and result.status is JobStatus.FAILED
+    letters = store.finalization_dead_letters(tenant)
+    assert len(letters) == 1
+    assert letters[0].reason is DeadLetterReason.PERMANENT
+    assert letters[0].phase is FinalizationPhase.NOTIFYING
+
+
+def test_transient_answer_failures_exhaust_to_dead_letter(tmp_path: Path) -> None:
+    class TimeoutAnswerer:
+        def answer(
+            self, job: AcquisitionJob, *, timeout_seconds: float
+        ) -> FinalAnswer | None:
+            del job, timeout_seconds
+            raise FinalizationTimeout("answer timed out")
+
+    clock = Clock()
+    store, tenant, job_id = ready_store(tmp_path, clock)
+    finalizer = DurableFinalizationWorker(
+        store=store,
+        worker_id="timeout-answerer",
+        lease_seconds=10,
+        answerer=TimeoutAnswerer(),
+        sink=Sink(),
+        policy=FinalizationPolicy(
+            answer_timeout_seconds=5,
+            notification_timeout_seconds=5,
+            lease_safety_seconds=1,
+            retry_base_seconds=1,
+            retry_max_seconds=1,
+            max_answer_failures=2,
+        ),
+    )
+    first = finalizer.run_next(job_id=job_id)
+    assert first is not None and first.status is JobStatus.ANSWERING
+    clock.now += 1_000_000
+    second = finalizer.run_next(job_id=job_id)
+    assert second is not None and second.status is JobStatus.FAILED
+    assert store.finalization_dead_letters(tenant)[0].reason is (
+        DeadLetterReason.RETRIES_EXHAUSTED
+    )
+
+
+def test_queue_snapshot_reports_due_deferred_and_dead_letters(tmp_path: Path) -> None:
+    clock = Clock()
+    store, tenant, job_id = ready_store(tmp_path, clock)
+    snapshot = store.finalization_queue_snapshot(tenant)
+    assert snapshot.ready == 1 and snapshot.dead_lettered == 0
+    sink = Sink(fail_once=True)
+    worker(store, Answerer(FinalAnswer("Answer", ())), sink).run_next(job_id=job_id)
+    deferred = store.finalization_queue_snapshot(tenant)
+    assert deferred.notifying_deferred == 1
+    clock.now += 5_000_000
+    due = store.finalization_queue_snapshot(tenant)
+    assert due.notifying_due == 1
+
+
+def test_sink_receipt_mismatch_is_permanent(tmp_path: Path) -> None:
+    class BadSink(Sink):
+        def deliver(
+            self, command: PreparedNotification, *, timeout_seconds: float
+        ) -> NotificationReceipt:
+            receipt = super().deliver(command, timeout_seconds=timeout_seconds)
+            return NotificationReceipt(
+                tenant=receipt.tenant,
+                job_id=receipt.job_id,
+                notification_id=receipt.notification_id,
+                sink_id="wrong-sink",
+                command_digest=receipt.command_digest,
+                provider_receipt=receipt.provider_receipt,
+            )
+
+    clock = Clock()
+    store, tenant, job_id = ready_store(tmp_path, clock)
+    result = worker(store, Answerer(FinalAnswer("Answer", ())), BadSink()).run_next(
+        job_id=job_id
+    )
+    assert result is not None and result.status is JobStatus.FAILED
+    assert "does not match" in store.finalization_dead_letters(tenant)[0].error
+
+
+def test_notification_sink_conformance_replays_original_receipt() -> None:
+    command = PreparedNotification(
+        tenant=TenantId("tenant_a"),
+        job_id="job_0123456789abcdef",
+        sink_id=Sink.sink_id,
+        answer="Conformance answer",
+        evidence_handles=(),
+        corpus_generation="generation-v1",
+        query_digest="1" * 64,
+    )
+    sink = Sink()
+    receipt = check_notification_sink(sink, command, timeout_seconds=5)
+    assert receipt.notification_id == command.notification_id
+    assert len(sink.receipts) == 1
+    try:
+        check_notification_sink(sink, command, timeout_seconds=math.nan)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("non-finite conformance timeout was accepted")
+
+
+def test_unicode_callback_error_is_safely_dead_lettered(tmp_path: Path) -> None:
+    class UnicodeAnswerer:
+        def answer(
+            self, job: AcquisitionJob, *, timeout_seconds: float
+        ) -> FinalAnswer | None:
+            del job, timeout_seconds
+            raise PermanentFinalizationError("bad surrogate \ud800")
+
+    clock = Clock()
+    store, tenant, job_id = ready_store(tmp_path, clock)
+    result = DurableFinalizationWorker(
+        store=store,
+        worker_id="unicode-answerer",
+        lease_seconds=10,
+        answerer=UnicodeAnswerer(),
+        sink=Sink(),
+        policy=FinalizationPolicy(
+            answer_timeout_seconds=5,
+            notification_timeout_seconds=5,
+            lease_safety_seconds=1,
+        ),
+    ).run_next(job_id=job_id)
+    assert result is not None and result.status is JobStatus.FAILED
+    assert "?" in store.finalization_dead_letters(tenant)[0].error

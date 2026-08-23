@@ -18,7 +18,11 @@ from typing import Protocol, cast
 
 from celiums_rezero.knowledge.schemas import (
     AcquisitionJob,
+    DeadLetterReason,
     EmbeddedChunk,
+    FinalizationDeadLetter,
+    FinalizationPhase,
+    FinalizationQueueSnapshot,
     IngestMode,
     JobLease,
     JobStatus,
@@ -32,7 +36,7 @@ from celiums_rezero.knowledge.schemas import (
 )
 from celiums_rezero.lab.serialization import canonical_json, content_hash
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _MAX_OUTBOX_BYTES = 32 * 1024 * 1024
 _LEASE_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 
@@ -146,7 +150,7 @@ class SQLiteTenantStore:
         self._initializing = created
         self._migrating = False
         if not created:
-            self._migrating = self._verify_existing_database() == 1
+            self._migrating = self._verify_existing_database() < _SCHEMA_VERSION
         with self._connect() as connection:
             if created:
                 self._initialize_new(connection)
@@ -514,7 +518,7 @@ class SQLiteTenantStore:
         with self._transaction() as connection:
             now = self._clock_us()
             expires = now + int(lease_seconds * 1_000_000)
-            parameters: list[object] = [now, now]
+            parameters: list[object] = [now, now, now]
             predicate = ""
             if job_id is not None:
                 predicate = "AND jobs.job_id = ?"
@@ -524,11 +528,17 @@ class SQLiteTenantStore:
                 SELECT jobs.*, leases.fence
                 FROM jobs JOIN leases USING (job_id)
                 LEFT JOIN notification_outbox USING (job_id)
+                LEFT JOIN answer_retries USING (job_id)
                 WHERE jobs.status IN ('ready', 'answering', 'notifying')
                   AND (leases.owner_id IS NULL OR leases.expires_at_us <= ?)
                   AND (
-                    jobs.status != 'notifying'
-                    OR notification_outbox.next_attempt_at_us <= ?
+                    (jobs.status = 'ready')
+                    OR (jobs.status = 'answering' AND (
+                        answer_retries.next_attempt_at_us IS NULL
+                        OR answer_retries.next_attempt_at_us <= ?
+                    ))
+                    OR (jobs.status = 'notifying'
+                        AND notification_outbox.next_attempt_at_us <= ?)
                   )
                   {predicate}
                 ORDER BY jobs.updated_at_us, jobs.job_id
@@ -590,6 +600,7 @@ class SQLiteTenantStore:
                 or command.corpus_generation != job.corpus_generation
             ):
                 raise ValueError("notification does not match its durable job")
+            connection.execute("DELETE FROM answer_retries WHERE job_id = ?", (lease.job_id,))
             existing = connection.execute(
                 "SELECT command_digest, payload_json FROM notification_outbox "
                 "WHERE job_id = ?",
@@ -657,19 +668,56 @@ class SQLiteTenantStore:
             raise KeyError("notification outbox is absent")
         return int(row["attempts"])
 
+    def answer_failures(self, tenant: TenantId, job_id: str) -> int:
+        self._require_tenant(tenant)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT failures FROM answer_retries WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return 0 if row is None else int(row["failures"])
+
+    def defer_answering(
+        self,
+        lease: JobLease,
+        *,
+        error: str,
+        delay_us: int,
+    ) -> AcquisitionJob:
+        self._require_lease(lease)
+        if not error or delay_us < 1:
+            raise ValueError("answer retry evidence is invalid")
+        with self._transaction() as connection:
+            now = self._clock_us()
+            job = self._leased_job(connection, lease, now)
+            if job.status is not JobStatus.ANSWERING:
+                raise ValueError("only answering jobs can be deferred")
+            connection.execute(
+                "INSERT INTO answer_retries "
+                "(job_id, failures, next_attempt_at_us, last_error, updated_at_us) "
+                "VALUES (?, 1, ?, ?, ?) "
+                "ON CONFLICT(job_id) DO UPDATE SET failures = failures + 1, "
+                "next_attempt_at_us = excluded.next_attempt_at_us, "
+                "last_error = excluded.last_error, updated_at_us = excluded.updated_at_us",
+                (lease.job_id, now + delay_us, _truncate_utf8(error, 4096), now),
+            )
+            self._clear_lease(connection, lease)
+        updated = self.get(self.tenant, lease.job_id)
+        assert updated is not None
+        return updated
+
     def defer_notification(
         self,
         lease: JobLease,
         *,
         error: str,
-        delay_seconds: float,
+        delay_us: int,
     ) -> None:
         self._require_lease(lease)
-        if not error or delay_seconds <= 0:
+        if not error or delay_us < 1:
             raise ValueError("notification retry evidence is invalid")
         with self._transaction() as connection:
             now = self._clock_us()
-            next_attempt = now + int(delay_seconds * 1_000_000)
+            next_attempt = now + delay_us
             job = self._leased_job(connection, lease, now)
             if job.status is not JobStatus.NOTIFYING:
                 raise ValueError("only notifying jobs can be deferred")
@@ -677,11 +725,172 @@ class SQLiteTenantStore:
                 "UPDATE notification_outbox SET attempts = attempts + 1, "
                 "next_attempt_at_us = ?, last_error = ? WHERE job_id = ? "
                 "AND receipt_json IS NULL",
-                (next_attempt, error[:4096], lease.job_id),
+                (next_attempt, _truncate_utf8(error, 4096), lease.job_id),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("notification retry could not be recorded")
             self._clear_lease(connection, lease)
+
+    def dead_letter_finalization(
+        self,
+        lease: JobLease,
+        *,
+        reason: DeadLetterReason,
+        error: str,
+        failures: int,
+        attempted: bool = True,
+    ) -> AcquisitionJob:
+        self._require_lease(lease)
+        if failures < 1 or not error:
+            raise ValueError("dead-letter evidence is invalid")
+        with self._transaction() as connection:
+            now = self._clock_us()
+            job = self._leased_job(connection, lease, now)
+            if job.status not in {JobStatus.ANSWERING, JobStatus.NOTIFYING}:
+                raise ValueError("only finalization jobs can be dead-lettered")
+            phase = FinalizationPhase(job.status.value)
+            bounded_error = _truncate_utf8(error, 4096)
+            if phase is FinalizationPhase.ANSWERING:
+                connection.execute(
+                    "INSERT INTO answer_retries "
+                    "(job_id, failures, next_attempt_at_us, last_error, updated_at_us) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(job_id) DO UPDATE SET failures = excluded.failures, "
+                    "last_error = excluded.last_error, updated_at_us = excluded.updated_at_us",
+                    (lease.job_id, failures, now, bounded_error, now),
+                )
+            if phase is FinalizationPhase.NOTIFYING and attempted:
+                connection.execute(
+                    "UPDATE notification_outbox SET attempts = attempts + 1, "
+                    "last_error = ? WHERE job_id = ? AND receipt_json IS NULL",
+                    (bounded_error, lease.job_id),
+                )
+            connection.execute(
+                "INSERT INTO finalization_dead_letters "
+                "(job_id, phase, reason, failures, error, dead_lettered_at_us) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (lease.job_id, phase.value, reason.value, failures, bounded_error, now),
+            )
+            connection.execute(
+                "UPDATE jobs SET status = 'failed', updated_at_us = ?, failure = ? "
+                "WHERE job_id = ? AND status = ?",
+                (
+                    now,
+                    _truncate_utf8(f"{reason.value}: {error}", 4096),
+                    lease.job_id,
+                    phase.value,
+                ),
+            )
+            self._clear_lease(connection, lease)
+        updated = self.get(self.tenant, lease.job_id)
+        assert updated is not None
+        return updated
+
+    def finalization_dead_letters(
+        self, tenant: TenantId, *, limit: int = 100
+    ) -> tuple[FinalizationDeadLetter, ...]:
+        self._require_tenant(tenant)
+        if not 1 <= limit <= 10_000:
+            raise ValueError("dead-letter list limit is invalid")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM finalization_dead_letters "
+                "ORDER BY dead_lettered_at_us, job_id LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return tuple(
+            FinalizationDeadLetter(
+                tenant=tenant,
+                job_id=cast(str, row["job_id"]),
+                phase=FinalizationPhase(row["phase"]),
+                reason=DeadLetterReason(row["reason"]),
+                failures=cast(int, row["failures"]),
+                error=cast(str, row["error"]),
+                dead_lettered_at_us=cast(int, row["dead_lettered_at_us"]),
+            )
+            for row in rows
+        )
+
+    def finalization_queue_snapshot(self, tenant: TenantId) -> FinalizationQueueSnapshot:
+        self._require_tenant(tenant)
+        now = self._clock_us()
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            try:
+                statuses = dict(
+                    connection.execute(
+                        "SELECT status, COUNT(*) FROM jobs "
+                        "WHERE status IN ('ready','answering','notifying') GROUP BY status"
+                    ).fetchall()
+                )
+                answering_deferred = connection.execute(
+                    "SELECT COUNT(*) FROM answer_retries a JOIN jobs USING(job_id) "
+                    "WHERE jobs.status = 'answering' AND a.next_attempt_at_us > ?",
+                    (now,),
+                ).fetchone()[0]
+                answering_due = connection.execute(
+                    "SELECT COUNT(*) FROM jobs LEFT JOIN answer_retries a USING(job_id) "
+                    "LEFT JOIN leases l USING(job_id) WHERE jobs.status = 'answering' "
+                    "AND (a.next_attempt_at_us IS NULL OR a.next_attempt_at_us <= ?) "
+                    "AND (l.owner_id IS NULL OR l.expires_at_us <= ?)",
+                    (now, now),
+                ).fetchone()[0]
+                notifying_due = connection.execute(
+                    "SELECT COUNT(*) FROM notification_outbox n JOIN jobs USING(job_id) "
+                    "LEFT JOIN leases l USING(job_id) "
+                    "WHERE jobs.status = 'notifying' AND n.next_attempt_at_us <= ? "
+                    "AND (l.owner_id IS NULL OR l.expires_at_us <= ?)",
+                    (now, now),
+                ).fetchone()[0]
+                notifying_deferred = connection.execute(
+                    "SELECT COUNT(*) FROM notification_outbox n JOIN jobs USING(job_id) "
+                    "WHERE jobs.status = 'notifying' AND n.next_attempt_at_us > ?",
+                    (now,),
+                ).fetchone()[0]
+                leased = connection.execute(
+                    "SELECT COUNT(*) FROM leases l JOIN jobs USING(job_id) "
+                    "WHERE jobs.status IN ('ready','answering','notifying') "
+                    "AND l.owner_id IS NOT NULL AND l.expires_at_us > ?",
+                    (now,),
+                ).fetchone()[0]
+                dead_lettered = connection.execute(
+                    "SELECT COUNT(*) FROM finalization_dead_letters"
+                ).fetchone()[0]
+                attempts = connection.execute(
+                    "SELECT COALESCE(SUM(attempts), 0) FROM notification_outbox"
+                ).fetchone()[0]
+                oldest = connection.execute(
+                    "SELECT MIN(jobs.updated_at_us) FROM jobs "
+                    "LEFT JOIN answer_retries a USING(job_id) "
+                    "LEFT JOIN notification_outbox n USING(job_id) "
+                    "LEFT JOIN leases l USING(job_id) "
+                    "WHERE (l.owner_id IS NULL OR l.expires_at_us <= ?) AND ("
+                    "jobs.status = 'ready' OR "
+                    "(jobs.status = 'answering' AND "
+                    "(a.next_attempt_at_us IS NULL OR a.next_attempt_at_us <= ?)) OR "
+                    "(jobs.status = 'notifying' AND n.next_attempt_at_us <= ?))",
+                    (now, now, now),
+                ).fetchone()[0]
+                connection.execute("COMMIT")
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return FinalizationQueueSnapshot(
+            tenant=tenant,
+            observed_at_us=now,
+            ready=int(statuses.get("ready", 0)),
+            answering_due=int(answering_due),
+            answering_deferred=int(answering_deferred),
+            notifying_due=int(notifying_due),
+            notifying_deferred=int(notifying_deferred),
+            leased=int(leased),
+            dead_lettered=int(dead_lettered),
+            notification_attempts=int(attempts),
+            oldest_claimable_age_seconds=(
+                0.0 if oldest is None else max((now - int(oldest)) / 1_000_000, 0.0)
+            ),
+        )
 
     def complete_notification(
         self, lease: JobLease, receipt_json: str
@@ -1012,7 +1221,8 @@ class SQLiteTenantStore:
                     "SELECT type, name, sql FROM sqlite_master "
                     "WHERE name IN "
                     "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
-                    "'jobs_status_created','notification_due') "
+                    "'answer_retries','finalization_dead_letters','jobs_status_created',"
+                    "'notification_due','answer_retry_due','finalization_dead_lettered') "
                     "ORDER BY type, name"
                 ).fetchall()
                 schema_digest = hashlib.sha256(
@@ -1072,7 +1282,7 @@ class SQLiteTenantStore:
             if row is None or row["tenant_id"] != self.tenant.value:
                 raise PermissionError("SQLite database belongs to another tenant")
             version = int(row["schema_version"])
-            if version not in {1, _SCHEMA_VERSION}:
+            if version not in {1, 2, _SCHEMA_VERSION}:
                 raise PermissionError("SQLite database schema version is unsupported")
             required = {
                 "tenant_meta",
@@ -1080,8 +1290,10 @@ class SQLiteTenantStore:
                 "leases",
                 "ingest_outbox",
             }
-            if version == _SCHEMA_VERSION:
+            if version >= 2:
                 required.add("notification_outbox")
+            if version == _SCHEMA_VERSION:
+                required.update({"answer_retries", "finalization_dead_letters"})
             if tables != required:
                 raise PermissionError("SQLite database is not a recognized tenant authority")
             forbidden = connection.execute(
@@ -1117,7 +1329,7 @@ class SQLiteTenantStore:
                     "receipt_digest",
                 },
             }
-            if version == _SCHEMA_VERSION:
+            if version >= 2:
                 expected_columns["notification_outbox"] = {
                     "job_id",
                     "notification_id",
@@ -1132,6 +1344,22 @@ class SQLiteTenantStore:
                     "receipt_digest",
                     "delivered_at_us",
                 }
+            if version == _SCHEMA_VERSION:
+                expected_columns["answer_retries"] = {
+                    "job_id",
+                    "failures",
+                    "next_attempt_at_us",
+                    "last_error",
+                    "updated_at_us",
+                }
+                expected_columns["finalization_dead_letters"] = {
+                    "job_id",
+                    "phase",
+                    "reason",
+                    "failures",
+                    "error",
+                    "dead_lettered_at_us",
+                }
             for table, columns in expected_columns.items():
                 info = connection.execute(f"PRAGMA table_info({table})").fetchall()
                 observed = {cast(str, row[1]) for row in info}
@@ -1143,7 +1371,7 @@ class SQLiteTenantStore:
             ).fetchall()
             notification_keys = (
                 connection.execute("PRAGMA foreign_key_list(notification_outbox)").fetchall()
-                if version == _SCHEMA_VERSION
+                if version >= 2
                 else (object(),)
             )
             if not foreign_keys or not outbox_keys or not notification_keys:
@@ -1156,15 +1384,23 @@ class SQLiteTenantStore:
                 ).fetchall()
             }
             expected_indexes = {"jobs_status_created"}
-            if version == _SCHEMA_VERSION:
+            if version >= 2:
                 expected_indexes.add("notification_due")
+            if version == _SCHEMA_VERSION:
+                expected_indexes.update({"answer_retry_due", "finalization_dead_lettered"})
             if indexes != expected_indexes:
                 raise PermissionError("SQLite tenant schema indexes are incompatible")
             names = (
                 "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
-                "'jobs_status_created','notification_due')"
+                "'answer_retries','finalization_dead_letters','jobs_status_created',"
+                "'notification_due','answer_retry_due','finalization_dead_lettered')"
                 if version == _SCHEMA_VERSION
+                else (
+                "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+                "'jobs_status_created','notification_due')"
+                if version == 2
                 else "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created')"
+                )
             )
             schema_rows = connection.execute(
                 "SELECT type, name, sql FROM sqlite_master "
@@ -1173,11 +1409,11 @@ class SQLiteTenantStore:
             schema_digest = hashlib.sha256(
                 canonical_json([tuple(row) for row in schema_rows]).encode()
             ).hexdigest()
-            expected_digest = (
-                _EXPECTED_SCHEMA_DIGEST
-                if version == _SCHEMA_VERSION
-                else _EXPECTED_SCHEMA_V1_DIGEST
-            )
+            expected_digest = {
+                1: _EXPECTED_SCHEMA_V1_DIGEST,
+                2: _EXPECTED_SCHEMA_V2_DIGEST,
+                _SCHEMA_VERSION: _EXPECTED_SCHEMA_DIGEST,
+            }[version]
             if schema_digest != expected_digest:
                 raise PermissionError("SQLite tenant schema definition is incompatible")
             if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
@@ -1221,9 +1457,24 @@ class SQLiteTenantStore:
                         raise RuntimeError("SQLite v1 schema definition changed before migration")
                     connection.execute(_NOTIFICATION_TABLE_SQL)
                     connection.execute(_NOTIFICATION_INDEX_SQL)
+                    version = 2
+                if version == 2:
+                    objects = {
+                        (cast(str, row[0]), cast(str, row[1]))
+                        for row in connection.execute(
+                            "SELECT type, name FROM sqlite_master "
+                            "WHERE name NOT LIKE 'sqlite_%'"
+                        ).fetchall()
+                    }
+                    if objects != _EXPECTED_SCHEMA_V2_OBJECTS:
+                        raise RuntimeError("SQLite v2 schema changed before migration")
+                    connection.execute(_ANSWER_RETRIES_TABLE_SQL)
+                    connection.execute(_ANSWER_RETRY_INDEX_SQL)
+                    connection.execute(_DEAD_LETTER_TABLE_SQL)
+                    connection.execute(_DEAD_LETTER_INDEX_SQL)
                     connection.execute(
                         "UPDATE tenant_meta SET schema_version = ? "
-                        "WHERE singleton = 1 AND schema_version = 1",
+                        "WHERE singleton = 1 AND schema_version IN (1, 2)",
                         (_SCHEMA_VERSION,),
                     )
                 elif version != _SCHEMA_VERSION:
@@ -1247,13 +1498,15 @@ class SQLiteTenantStore:
                 "SELECT type, name, sql FROM sqlite_master "
                 "WHERE name IN "
                 "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
-                "'jobs_status_created','notification_due') ORDER BY type, name"
+                "'answer_retries','finalization_dead_letters','jobs_status_created',"
+                "'notification_due','answer_retry_due','finalization_dead_lettered') "
+                "ORDER BY type, name"
             ).fetchall()
             digest = hashlib.sha256(
                 canonical_json([tuple(row) for row in rows]).encode()
             ).hexdigest()
             if digest != _EXPECTED_SCHEMA_DIGEST:
-                raise RuntimeError("SQLite v2 schema migration digest is invalid")
+                raise RuntimeError("SQLite v3 schema migration digest is invalid")
 
     @staticmethod
     def _check_integrity(connection: sqlite3.Connection) -> None:
@@ -1607,6 +1860,14 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def _truncate_utf8(value: str, maximum_bytes: int) -> str:
+    sanitized = value.encode(errors="replace").decode()
+    encoded = sanitized.encode()
+    if len(encoded) <= maximum_bytes:
+        return sanitized
+    return encoded[:maximum_bytes].decode(errors="ignore")
+
+
 def _iso_to_us(value: str) -> int:
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
@@ -1758,8 +2019,46 @@ CREATE INDEX notification_due ON notification_outbox(next_attempt_at_us, job_id)
 
 _NOTIFICATION_SCHEMA = _NOTIFICATION_TABLE_SQL + ";" + _NOTIFICATION_INDEX_SQL + ";"
 
+_ANSWER_RETRIES_TABLE_SQL = """
+CREATE TABLE answer_retries (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE,
+    failures INTEGER NOT NULL CHECK (failures >= 1),
+    next_attempt_at_us INTEGER NOT NULL,
+    last_error TEXT NOT NULL,
+    updated_at_us INTEGER NOT NULL
+)
+"""
+_ANSWER_RETRY_INDEX_SQL = """
+CREATE INDEX answer_retry_due ON answer_retries(next_attempt_at_us, job_id)
+"""
+_DEAD_LETTER_TABLE_SQL = """
+CREATE TABLE finalization_dead_letters (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE RESTRICT,
+    phase TEXT NOT NULL CHECK (phase IN ('answering', 'notifying')),
+    reason TEXT NOT NULL CHECK (reason IN ('permanent', 'retries_exhausted')),
+    failures INTEGER NOT NULL CHECK (failures >= 1),
+    error TEXT NOT NULL,
+    dead_lettered_at_us INTEGER NOT NULL
+)
+"""
+_DEAD_LETTER_INDEX_SQL = """
+CREATE INDEX finalization_dead_lettered
+    ON finalization_dead_letters(dead_lettered_at_us, job_id)
+"""
+_FINALIZATION_OPERATIONS_SCHEMA = (
+    _ANSWER_RETRIES_TABLE_SQL
+    + ";"
+    + _ANSWER_RETRY_INDEX_SQL
+    + ";"
+    + _DEAD_LETTER_TABLE_SQL
+    + ";"
+    + _DEAD_LETTER_INDEX_SQL
+    + ";"
+)
+
 _SCHEMA_V1 = _SCHEMA
-_SCHEMA += _NOTIFICATION_SCHEMA
+_SCHEMA_V2 = _SCHEMA_V1 + _NOTIFICATION_SCHEMA
+_SCHEMA = _SCHEMA_V2 + _FINALIZATION_OPERATIONS_SCHEMA
 
 def _expected_schema_digest() -> str:
     connection = sqlite3.connect(":memory:")
@@ -1768,7 +2067,9 @@ def _expected_schema_digest() -> str:
         rows = connection.execute(
             "SELECT type, name, sql FROM sqlite_master "
             "WHERE name IN ('tenant_meta','jobs','leases','ingest_outbox',"
-            "'notification_outbox','jobs_status_created','notification_due') "
+            "'notification_outbox','answer_retries','finalization_dead_letters',"
+            "'jobs_status_created','notification_due','answer_retry_due',"
+            "'finalization_dead_lettered') "
             "ORDER BY type, name"
         ).fetchall()
         return hashlib.sha256(canonical_json([tuple(row) for row in rows]).encode()).hexdigest()
@@ -1794,6 +2095,11 @@ _EXPECTED_SCHEMA_V1_DIGEST = _schema_digest(
     _SCHEMA_V1,
     "('tenant_meta','jobs','leases','ingest_outbox','jobs_status_created')",
 )
+_EXPECTED_SCHEMA_V2_DIGEST = _schema_digest(
+    _SCHEMA_V2,
+    "('tenant_meta','jobs','leases','ingest_outbox','notification_outbox',"
+    "'jobs_status_created','notification_due')",
+)
 _EXPECTED_SCHEMA_OBJECTS = {
     ("table", "tenant_meta"),
     ("table", "jobs"),
@@ -1802,6 +2108,10 @@ _EXPECTED_SCHEMA_OBJECTS = {
     ("table", "notification_outbox"),
     ("index", "jobs_status_created"),
     ("index", "notification_due"),
+    ("table", "answer_retries"),
+    ("index", "answer_retry_due"),
+    ("table", "finalization_dead_letters"),
+    ("index", "finalization_dead_lettered"),
 }
 _EXPECTED_SCHEMA_V1_OBJECTS = {
     ("table", "tenant_meta"),
@@ -1809,4 +2119,13 @@ _EXPECTED_SCHEMA_V1_OBJECTS = {
     ("table", "leases"),
     ("table", "ingest_outbox"),
     ("index", "jobs_status_created"),
+}
+_EXPECTED_SCHEMA_V2_OBJECTS = {
+    ("table", "tenant_meta"),
+    ("table", "jobs"),
+    ("table", "leases"),
+    ("table", "ingest_outbox"),
+    ("table", "notification_outbox"),
+    ("index", "jobs_status_created"),
+    ("index", "notification_due"),
 }

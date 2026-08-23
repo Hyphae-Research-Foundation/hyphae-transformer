@@ -78,6 +78,16 @@ class IngestMode(StrEnum):
     LIVE = "live"
 
 
+class FinalizationPhase(StrEnum):
+    ANSWERING = "answering"
+    NOTIFYING = "notifying"
+
+
+class DeadLetterReason(StrEnum):
+    PERMANENT = "permanent"
+    RETRIES_EXHAUSTED = "retries_exhausted"
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceHit:
     handle: str
@@ -611,6 +621,58 @@ class NotificationReceipt:
             raise ValueError("notification receipt command digest is invalid")
         if not self.provider_receipt or len(self.provider_receipt.encode()) > 4096:
             raise ValueError("notification provider receipt is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class FinalizationDeadLetter:
+    tenant: TenantId
+    job_id: str
+    phase: FinalizationPhase
+    reason: DeadLetterReason
+    failures: int
+    error: str
+    dead_lettered_at_us: int
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"job_[0-9a-f]{16}", self.job_id):
+            raise ValueError("dead-letter job ID is invalid")
+        if self.failures < 1 or self.dead_lettered_at_us < 1:
+            raise ValueError("dead-letter count and time must be positive")
+        if not self.error or len(self.error.encode()) > 4096:
+            raise ValueError("dead-letter error is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class FinalizationQueueSnapshot:
+    tenant: TenantId
+    observed_at_us: int
+    ready: int
+    answering_due: int
+    answering_deferred: int
+    notifying_due: int
+    notifying_deferred: int
+    leased: int
+    dead_lettered: int
+    notification_attempts: int
+    oldest_claimable_age_seconds: float
+
+    def __post_init__(self) -> None:
+        counts = (
+            self.ready,
+            self.answering_due,
+            self.answering_deferred,
+            self.notifying_due,
+            self.notifying_deferred,
+            self.leased,
+            self.dead_lettered,
+            self.notification_attempts,
+        )
+        if self.observed_at_us < 1 or any(value < 0 for value in counts):
+            raise ValueError("finalization queue snapshot counters are invalid")
+        if not isfinite(self.oldest_claimable_age_seconds) or (
+            self.oldest_claimable_age_seconds < 0
+        ):
+            raise ValueError("finalization queue snapshot age is invalid")
 
 
 @dataclass(frozen=True, slots=True)

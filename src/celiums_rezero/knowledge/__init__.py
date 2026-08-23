@@ -9,11 +9,16 @@ from celiums_rezero.knowledge.acquisition import (
     InMemorySourceConnector,
     SecurityRejection,
 )
+from celiums_rezero.knowledge.conformance import check_notification_sink
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
 from celiums_rezero.knowledge.finalization import (
     DurableFinalizationWorker,
     FinalAnswer,
+    FinalizationPolicy,
+    FinalizationTimeout,
     KnowledgeScheduler,
+    PermanentFinalizationError,
+    TransientFinalizationError,
 )
 from celiums_rezero.knowledge.live import (
     FetchResponse,
@@ -61,6 +66,8 @@ __all__ = [
     "EvidenceHit",
     "FetchResponse",
     "FinalAnswer",
+    "FinalizationPolicy",
+    "FinalizationTimeout",
     "HttpsFetchPolicy",
     "HttpsSourceConnector",
     "HyphaeRetrievalGateway",
@@ -72,6 +79,7 @@ __all__ = [
     "KnowledgeCoordinator",
     "KnowledgeResponse",
     "KnowledgeScheduler",
+    "PermanentFinalizationError",
     "PublicationReceiptStore",
     "RetrievalConfig",
     "RetrievalContractError",
@@ -81,4 +89,6 @@ __all__ = [
     "SufficiencyDecision",
     "SufficiencyPolicy",
     "TenantId",
+    "TransientFinalizationError",
+    "check_notification_sink",
 ]

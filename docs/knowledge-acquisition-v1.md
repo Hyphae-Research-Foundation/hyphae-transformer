@@ -223,10 +223,26 @@ finalization claims to prevent either queue from starving; its run loop sleeps o
 when no work was performed. Database leases remain the authority if multiple scheduler
 processes overlap.
 
-Finalization callbacks still require deployment-enforced timeouts; lease expiry and
-sink idempotency preserve replay safety but cannot stop a blocked third-party call.
-Production retry policy also still needs jitter, permanent-error classification,
-dead-letter handling, and operational queue/error metrics.
+Finalization callback contracts now receive explicit answer and notification deadlines,
+and worker construction requires a lease that covers the largest deadline plus a
+safety window. Adapters must enforce those deadlines in their own transport or a
+supervised process boundary; Python worker threads are not treated as hard cancellation.
+Lease expiry and sink idempotency preserve replay safety but cannot stop an adapter that
+ignores its timeout contract.
+
+Typed transient, permanent, and timeout failures drive deterministic SHA-256 equal
+jitter, independent retry limits for answering and notifying, and durable schema-v3
+dead letters. Unexpected adapter exceptions fail closed as permanent. Answer retries,
+notification attempts, due times, bounded errors, and dead-letter evidence survive
+restart. `FinalizationQueueSnapshot` exposes authoritative queue/deferred/lease/DLQ
+counts and oldest-ready age without adding high-cardinality labels, while scheduler
+error history is bounded in memory.
+
+`check_notification_sink` is an in-process adapter smoke check for stable ID, logical
+receipt replay, and exact command binding. Provider-side durable deduplication across
+adapter/process restart and hard timeout behavior require a separate integration test
+against the real provider. Power-loss qualification, jitter/dead-letter alerting
+thresholds, and metrics export remain deployment concerns.
 
 ## Isolated Hyphae Conformance
 
