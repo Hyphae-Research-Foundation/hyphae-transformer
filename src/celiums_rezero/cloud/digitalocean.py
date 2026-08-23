@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -10,6 +11,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+
+CLEANUP_RESERVE_SECONDS = 300
 
 
 class CommandRunner(Protocol):
@@ -57,6 +60,7 @@ class CloudCampaignPlan:
     hourly_rate_usd: float
     max_lifetime_seconds: int
     max_cost_usd: float
+    accelerator: str = "nvidia"
     remote_root: str = "/opt/hyphae-transformer"
     remote_data_root: str = "/opt/celiums-data"
     remote_run_root: str = "/opt/celiums-runs/campaign"
@@ -64,22 +68,47 @@ class CloudCampaignPlan:
     def __post_init__(self) -> None:
         if not self.name or not self.region or not self.size or not self.image:
             raise ValueError("cloud resource identifiers are required")
-        if not self.revision or len(self.revision) < 7:
+        if not re.fullmatch(r"[0-9a-f]{40}", self.revision):
             raise ValueError("an immutable source revision is required")
         if self.max_lifetime_seconds < 60:
             raise ValueError("cloud lifetime must be at least 60 seconds")
+        if self.max_lifetime_seconds <= CLEANUP_RESERVE_SECONDS:
+            raise ValueError("cloud lifetime must exceed the cleanup reserve")
         if min(self.hourly_rate_usd, self.max_cost_usd) <= 0:
             raise ValueError("cloud prices and cost budget must be positive")
         projected_cost = self.hourly_rate_usd * self.max_lifetime_seconds / 3600
         if projected_cost > self.max_cost_usd + 1e-12:
             raise ValueError("maximum lifetime exceeds the cloud cost budget")
-        if not self.data_command or self.data_command[0] != "prepare-data":
+        if not self.data_command or self.data_command[0] not in {
+            "prepare-data",
+            "prepare-gemma4-e4b",
+        }:
             raise ValueError("data command must use the prepare-data allowlist")
         if not self.campaign_command or self.campaign_command[0] not in {
             "pilot-wikitext2",
             "pilot-enwiki8",
+            "smoke-gemma4-e4b",
         }:
             raise ValueError("campaign command is not allowlisted")
+        if self.accelerator not in {"nvidia", "amd-rocm"}:
+            raise ValueError("cloud accelerator is not allowlisted")
+        gemma_workload = self.data_command[0] == "prepare-gemma4-e4b" or (
+            self.campaign_command[0] == "smoke-gemma4-e4b"
+        )
+        if gemma_workload != (self.accelerator == "amd-rocm"):
+            raise ValueError("Gemma E4B workload requires the AMD ROCm executor")
+        if self.accelerator == "amd-rocm" and (
+            self.region != "mem1"
+            or self.size != "gpu-mi355x1-288gb-spot"
+            or self.image != "amddevelopercloud-pytorch2100rocm724"
+        ):
+            raise ValueError("Gemma E4B smoke requires the preregistered MI355X x1 shape")
+        if self.data_command[0] == "prepare-gemma4-e4b" and self.data_command != (
+            "prepare-gemma4-e4b",
+        ):
+            raise ValueError("Gemma E4B preparation does not accept plan arguments")
+        if self.campaign_command[0] == "smoke-gemma4-e4b":
+            _validate_gemma_smoke_command(self.campaign_command)
         for value in (
             self.remote_root,
             self.remote_data_root,
@@ -130,25 +159,57 @@ def execute_digitalocean_campaign(
     droplet_id: int | None = None
     public_ip: str | None = None
     created_at: datetime | None = None
+    created_clock: float | None = None
     failure: str | None = None
     status = "failed"
     try:
-        created = command_runner.run(commands[0], timeout=600)
+        create_started_at = datetime.now(UTC)
+        create_started_clock = time.monotonic()
+        created = command_runner.run(
+            commands[0], timeout=min(600, plan.max_lifetime_seconds)
+        )
         values = json.loads(created.stdout)
         if not isinstance(values, list) or len(values) != 1:
             raise RuntimeError("DigitalOcean create did not return exactly one Droplet")
         droplet = values[0]
         droplet_id = int(droplet["id"])
         public_ip = _public_ipv4(droplet)
-        created_at = datetime.now(UTC)
-        _wait_for_ssh(plan, public_ip, command_runner, sleep=sleep)
-        command_runner.run(_ssh_command(plan, public_ip, _bootstrap_script(plan)), timeout=900)
+        created_at = create_started_at
+        created_clock = create_started_clock
+        _wait_for_ssh(
+            plan,
+            public_ip,
+            command_runner,
+            timeout_seconds=min(
+                300,
+                _remaining_lifetime(
+                    plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+                ),
+            ),
+            sleep=sleep,
+        )
+        command_runner.run(
+            _ssh_command(plan, public_ip, _bootstrap_script(plan)),
+            timeout=_remaining_lifetime(
+                plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+            ),
+        )
         command_runner.run(
             _ssh_command(plan, public_ip, _campaign_script(plan)),
-            timeout=plan.max_lifetime_seconds + 300,
+            timeout=_remaining_lifetime(
+                plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+            ),
         )
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
-        command_runner.run(_rsync_command(plan, public_ip), timeout=900)
+        command_runner.run(
+            _rsync_command(plan, public_ip),
+            timeout=min(
+                900,
+                _remaining_lifetime(
+                    plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+                ),
+            ),
+        )
         status = "completed"
     except Exception as error:
         detail = ""
@@ -157,22 +218,32 @@ def execute_digitalocean_campaign(
         failure = f"{type(error).__name__}: {error}{detail}"
         if public_ip is not None:
             try:
+                if created_clock is None:
+                    raise RuntimeError("cloud creation clock is absent")
                 plan.artifact_directory.mkdir(parents=True, exist_ok=True)
                 command_runner.run(
                     _rsync_command(plan, public_ip),
                     check=False,
-                    timeout=300,
+                    timeout=min(
+                        300,
+                        _remaining_lifetime(
+                            plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+                        ),
+                    ),
                 )
             except Exception:
                 pass
     finally:
-        deleted_at = datetime.now(UTC)
         if droplet_id is not None:
-            command_runner.run(
-                ["doctl", "compute", "droplet", "delete", str(droplet_id), "--force"],
-                check=False,
-                timeout=300,
-            )
+            try:
+                _delete_and_verify_droplet(command_runner, droplet_id, sleep=sleep)
+            except Exception as error:
+                status = "failed"
+                deletion_failure = f"DropletDeletionError: {error}"
+                failure = (
+                    deletion_failure if failure is None else f"{failure}; {deletion_failure}"
+                )
+        deleted_at = datetime.now(UTC)
 
     lifetime = 0.0 if created_at is None else (deleted_at - created_at).total_seconds()
     estimated_cost = lifetime * plan.hourly_rate_usd / 3600
@@ -232,9 +303,10 @@ def _wait_for_ssh(
     public_ip: str,
     runner: CommandRunner,
     *,
+    timeout_seconds: float = 300,
     sleep: object,
 ) -> None:
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         result = runner.run(
             _ssh_command(plan, public_ip, "true"),
@@ -244,7 +316,7 @@ def _wait_for_ssh(
         if result.returncode == 0:
             return
         if callable(sleep):
-            sleep(10)
+            sleep(min(10, max(0, deadline - time.monotonic())))
     raise TimeoutError("Droplet SSH did not become ready")
 
 
@@ -271,15 +343,58 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
             plan.remote_root,
         ]
     )
+    common = (
+        f"rm -rf {shlex.quote(plan.remote_root)}",
+        checkout,
+        f"git -C {shlex.quote(plan.remote_root)} checkout {shlex.quote(plan.revision)}",
+        "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        f"mkdir -p {shlex.quote(plan.remote_data_root)} {shlex.quote(plan.remote_run_root)}",
+    )
+    if plan.accelerator == "amd-rocm":
+        environment = "/opt/hyphae-rocm-venv"
+        model_root = f"{plan.remote_data_root}/gemma4-e4b"
+        return " && ".join(
+            (
+                *common,
+                "rocm-smi --showproductname --showmeminfo vram --showdriverversion",
+                (
+                    "python3 -c \"import torch; assert torch.version.hip; "
+                    "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
+                    "assert 'MI355' in torch.cuda.get_device_name(0)\""
+                ),
+                f"/root/.local/bin/uv venv --system-site-packages {environment}",
+                (
+                    f"/root/.local/bin/uv pip install --python {environment}/bin/python "
+                    "transformers==5.14.1"
+                ),
+                (
+                    f"/root/.local/bin/uv pip install --python {environment}/bin/python "
+                    f"--no-deps -e {shlex.quote(plan.remote_root)}"
+                ),
+                shlex.join(
+                    [
+                        f"{environment}/bin/python",
+                        f"{plan.remote_root}/scripts/download_gemma4_e4b.py",
+                        "--out",
+                        model_root,
+                    ]
+                ),
+                shlex.join(
+                    [
+                        f"{environment}/bin/python",
+                        f"{plan.remote_root}/scripts/preflight_gemma4_e4b.py",
+                        "--model",
+                        model_root,
+                        "--require-gpu",
+                    ]
+                ),
+            )
+        )
     return " && ".join(
         (
-            f"rm -rf {shlex.quote(plan.remote_root)}",
-            checkout,
-            f"git -C {shlex.quote(plan.remote_root)} checkout {shlex.quote(plan.revision)}",
-            "curl -LsSf https://astral.sh/uv/install.sh | sh",
+            *common,
             f"cd {shlex.quote(plan.remote_root)}",
             "/root/.local/bin/uv sync --frozen",
-            f"mkdir -p {shlex.quote(plan.remote_data_root)} {shlex.quote(plan.remote_run_root)}",
             shlex.join(
                 [
                     "/root/.local/bin/uv",
@@ -296,6 +411,29 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
 
 
 def _campaign_script(plan: CloudCampaignPlan) -> str:
+    if plan.campaign_command[0] == "smoke-gemma4-e4b":
+        campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
+        command = [
+            "/opt/hyphae-rocm-venv/bin/python",
+            f"{plan.remote_root}/scripts/smoke_gemma4_e4b.py",
+            "--model",
+            f"{plan.remote_data_root}/gemma4-e4b",
+            "--dataset",
+            f"{plan.remote_root}/experiments/governed/mars-v2-e4b-v1",
+            "--out",
+            f"{plan.remote_run_root}/gemma4-e4b-smoke.json",
+            *plan.campaign_command[1:],
+        ]
+        return " && ".join(
+            (
+                f"cd {shlex.quote(plan.remote_root)}",
+                (
+                    "timeout --signal=TERM "
+                    f"{campaign_seconds}s "
+                    f"{shlex.join(command)}"
+                ),
+            )
+        )
     command = [
         "/root/.local/bin/uv",
         "run",
@@ -306,10 +444,11 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "--run-root",
         plan.remote_run_root,
     ]
+    campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
     return " && ".join(
         (
             f"cd {shlex.quote(plan.remote_root)}",
-            f"timeout --signal=TERM {plan.max_lifetime_seconds}s {shlex.join(command)}",
+            f"timeout --signal=TERM {campaign_seconds}s {shlex.join(command)}",
         )
     )
 
@@ -339,3 +478,71 @@ def _public_ipv4(droplet: object) -> str:
             if isinstance(address, str):
                 return address
     raise RuntimeError("Droplet response has no public IPv4 address")
+
+
+def _delete_and_verify_droplet(
+    runner: CommandRunner, droplet_id: int, *, sleep: object
+) -> None:
+    deletion_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            runner.run(
+                ["doctl", "compute", "droplet", "delete", str(droplet_id), "--force"],
+                timeout=300,
+            )
+            deletion_error = None
+            break
+        except Exception as error:
+            deletion_error = error
+            if attempt < 2 and callable(sleep):
+                sleep(5)
+    if deletion_error is not None:
+        raise deletion_error
+
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        inventory = runner.run(
+            [
+                "doctl",
+                "compute",
+                "droplet",
+                "get",
+                str(droplet_id),
+                "--output",
+                "json",
+            ],
+            check=False,
+            timeout=60,
+        )
+        if inventory.returncode != 0:
+            return
+        if callable(sleep):
+            sleep(min(5, max(0, deadline - time.monotonic())))
+    raise RuntimeError("deleted Droplet remains in DigitalOcean inventory")
+
+
+def _validate_gemma_smoke_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "smoke-gemma4-e4b",
+        "--batch-sizes",
+        "1",
+        "2",
+        "4",
+        "8",
+        "--max-vram-gib",
+        "240",
+    ):
+        raise ValueError("Gemma E4B smoke command differs from preregistration")
+
+
+def _remaining_lifetime(
+    plan: CloudCampaignPlan, created_clock: float, *, reserve_seconds: float = 0
+) -> float:
+    remaining = (
+        plan.max_lifetime_seconds
+        - reserve_seconds
+        - (time.monotonic() - created_clock)
+    )
+    if remaining <= 0:
+        raise TimeoutError("Droplet paid-lifetime budget expired")
+    return remaining

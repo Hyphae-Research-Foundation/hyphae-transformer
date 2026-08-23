@@ -475,6 +475,7 @@ def command_cloud_digitalocean(arguments: argparse.Namespace) -> int:
         hourly_rate_usd=float(values["hourly_rate_usd"]),
         max_lifetime_seconds=int(values["max_lifetime_seconds"]),
         max_cost_usd=float(values["max_cost_usd"]),
+        accelerator=str(values.get("accelerator", "nvidia")),
     )
     summary = execute_digitalocean_campaign(plan, dry_run=arguments.dry_run)
     print(json.dumps(to_primitive(summary), indent=2, sort_keys=True))
