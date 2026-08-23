@@ -8,6 +8,7 @@ from math import isfinite
 from typing import Any, Protocol
 
 from celiums_rezero.knowledge.coordinator import normalize_query
+from celiums_rezero.knowledge.generation import GenerationAuthority
 from celiums_rezero.knowledge.schemas import EvidenceBundle, EvidenceHit, TenantId
 from celiums_rezero.lab.serialization import canonical_json, content_hash
 
@@ -41,6 +42,7 @@ class EmbeddingProvider(Protocol):
 class RetrievalConfig:
     collection: int
     corpus_generation: str
+    backend_id: str | None = None
     body_field: str = "body"
     source_id_field: str = "source_id"
     source_version_field: str = "source_version"
@@ -56,6 +58,11 @@ class RetrievalConfig:
     def __post_init__(self) -> None:
         if self.collection < 1 or not self.corpus_generation:
             raise ValueError("collection and corpus generation are required")
+        if self.backend_id is not None and (
+            len(self.backend_id) != 64
+            or any(character not in "0123456789abcdef" for character in self.backend_id)
+        ):
+            raise ValueError("retrieval backend ID must be lowercase SHA-256")
         if not 1 <= self.limit <= 64 or not self.limit <= self.candidate_limit <= 10_000:
             raise ValueError("retrieval result and candidate limits are invalid")
         if min(self.lexical_weight, self.vector_weight) < 1:
@@ -148,6 +155,12 @@ class HyphaeRetrievalGateway:
         snapshot = value.get("snapshot")
         if not isinstance(snapshot, dict):
             raise RetrievalContractError("Hyphae search result has no snapshot identity")
+        if self.config.backend_id is not None:
+            lineage = snapshot.get("directory_lineage")
+            if not isinstance(lineage, bytes) or len(lineage) != 24:
+                raise RetrievalContractError("Hyphae directory lineage is invalid")
+            if hashlib.sha256(lineage).hexdigest() != self.config.backend_id:
+                raise RetrievalContractError("Hyphae backend identity does not match routing")
         fingerprint = hashlib.sha256(
             canonical_json(_snapshot_primitive(snapshot)).encode()
         ).hexdigest()
@@ -203,6 +216,52 @@ class HyphaeRetrievalGateway:
             score=calibrated,
             content_digest=digest,
         )
+
+
+class GenerationRoutedRetriever:
+    """Builds a fresh immutable gateway from one active-generation snapshot per query."""
+
+    def __init__(
+        self,
+        *,
+        tenant: TenantId,
+        authority: GenerationAuthority,
+        client: HyphaeSearchClient,
+        embedder: EmbeddingProvider | None = None,
+        limit: int = 8,
+        candidate_limit: int = 32,
+    ) -> None:
+        self.tenant = tenant
+        self.authority = authority
+        self.client = client
+        self.embedder = embedder
+        self.limit = limit
+        self.candidate_limit = candidate_limit
+        if authority.store.tenant != tenant:
+            raise PermissionError("generation authority belongs to another tenant")
+
+    def retrieve(self, tenant: TenantId, query: str) -> EvidenceBundle:
+        if tenant != self.tenant:
+            raise PermissionError("generation router is bound to another tenant")
+        snapshot = self.authority.snapshot()
+        if snapshot.claims_paused:
+            raise RetrievalContractError("active generation claims are paused")
+        gateway = HyphaeRetrievalGateway(
+            tenant=tenant,
+            client=self.client,
+            config=RetrievalConfig(
+                collection=snapshot.target.collection,
+                corpus_generation=snapshot.generation_id,
+                backend_id=snapshot.target.backend_id,
+                vector_target=(
+                    snapshot.target.vector_target if self.embedder is not None else None
+                ),
+                limit=self.limit,
+                candidate_limit=self.candidate_limit,
+            ),
+            embedder=self.embedder,
+        )
+        return gateway.retrieve(tenant, query)
 
 
 def _snapshot_primitive(snapshot: dict[str, Any]) -> dict[str, object]:

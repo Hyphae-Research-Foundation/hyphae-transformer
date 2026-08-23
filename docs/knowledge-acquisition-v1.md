@@ -267,3 +267,28 @@ hydrated body digest. The endpoint and receipt directory must both be dedicated 
 same tenant; the script never initializes or mutates another tenant's data directory.
 `--backend-id` must be derived from the persistent Hyphae directory lineage, not its
 socket path, so recreating a backend cannot inherit local replay authority.
+
+## Production Runtime Boundary
+
+Schema version 4 adds immutable generation manifests, one active routing pointer,
+compare-and-swap pause/activate/resume/rollback receipts, unique backend collections,
+candidate inventory enforcement, generation-routed retrieval, and claim filtering.
+Candidate publication is allowed only into a registered building generation and must
+produce durable receipts covering the complete manifest before verification. Cutover
+requires paused admission plus drained predecessor/candidate acquisition and predecessor
+finalization; activation remains paused until explicit resume. Rollback targets only the
+immediate predecessor.
+
+Production adapters now include the ClamAV INSTREAM protocol, strict DLP response
+binding, fixed HTTPS notification acknowledgement, append-only audit chaining,
+Prometheus text rendering, a bounded process supervisor, and a host-owned frozen-model
+orchestrator that accepts only verbatim quotations from supplied evidence handles.
+`celiums-knowledge worker-once` loads a root-configured `module:factory` tenant adapter;
+the model cannot select that adapter, tenant, source, scanner, Hyphae target, generation,
+or notification destination.
+
+These components remain disabled without deployment configuration and real-service
+qualification. A real rollout must supply separate tenant Hyphae processes and
+collections, ClamAV definitions, authenticated DLP and notification providers,
+provider-side idempotency, externally anchored audit, OS sandboxing, pinned Gemma
+weights/runtime, monitored metrics, backups, canary cutover and tested rollback.

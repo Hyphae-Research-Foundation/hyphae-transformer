@@ -20,6 +20,7 @@ from celiums_rezero.knowledge.finalization import (
     PermanentFinalizationError,
     TransientFinalizationError,
 )
+from celiums_rezero.knowledge.generation import GenerationAuthority
 from celiums_rezero.knowledge.live import (
     FetchResponse,
     HttpsFetchPolicy,
@@ -46,7 +47,9 @@ from celiums_rezero.knowledge.schemas import (
     SufficiencyPolicy,
     TenantId,
 )
+from celiums_rezero.knowledge.security import ClamDScanner, ExternalDlpScanner
 from celiums_rezero.knowledge.store import InMemoryTenantStore, SQLiteTenantStore
+from celiums_rezero.knowledge.supervisor import run_supervised
 from celiums_rezero.knowledge.validation import (
     BoundedTextParser,
     StrictArtifactValidator,
@@ -59,15 +62,18 @@ __all__ = [
     "AcquisitionWorker",
     "BoundedTextParser",
     "ChunkingPolicy",
+    "ClamDScanner",
     "DurableAcquisitionWorker",
     "DurableFinalizationWorker",
     "DurablePublicationAuthorizer",
     "EvidenceBundle",
     "EvidenceHit",
+    "ExternalDlpScanner",
     "FetchResponse",
     "FinalAnswer",
     "FinalizationPolicy",
     "FinalizationTimeout",
+    "GenerationAuthority",
     "HttpsFetchPolicy",
     "HttpsSourceConnector",
     "HyphaeRetrievalGateway",
@@ -91,4 +97,5 @@ __all__ = [
     "TenantId",
     "TransientFinalizationError",
     "check_notification_sink",
+    "run_supervised",
 ]

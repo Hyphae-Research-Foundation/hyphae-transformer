@@ -89,6 +89,7 @@ class DurableJobStore(Protocol):
         owner_id: str,
         lease_seconds: float,
         job_id: str | None = None,
+        target: PublicationTarget | None = None,
     ) -> tuple[AcquisitionJob, JobLease] | None: ...
 
     def renew(self, lease: JobLease, *, lease_seconds: float) -> JobLease: ...
@@ -357,6 +358,7 @@ class DurableAcquisitionWorker(AcquisitionWorker):
             owner_id=self.worker_id,
             lease_seconds=self.lease_seconds,
             job_id=job_id,
+            target=self.ingestor.target,
         )
         if claimed is None:
             return None
@@ -434,6 +436,10 @@ class DurableAcquisitionWorker(AcquisitionWorker):
             raise AcquisitionError("ingestor mode is not a typed contract value")
         if mode is IngestMode.LIVE and target is None:
             raise AcquisitionError("live ingestor has no publication target")
+        if mode is IngestMode.LIVE and hasattr(store, "generation_target"):
+            expected_target = store.generation_target(job.corpus_generation)
+            if expected_target != target:
+                raise AcquisitionError("live ingestor target does not match job generation")
         artifact = self.connector.acquire(job.tenant, job.source_id, job.query)
         if artifact.tenant != job.tenant or artifact.source_id != job.source_id:
             raise AcquisitionError("source connector crossed its tenant or source binding")
