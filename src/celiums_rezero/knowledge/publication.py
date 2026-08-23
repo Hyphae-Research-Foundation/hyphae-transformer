@@ -78,7 +78,6 @@ class PublicationReceiptStore:
         if receipt.tenant != tenant or receipt.idempotency_key != idempotency_key:
             raise ValueError("ingest receipt path binding is invalid")
         return receipt
-
     def _tenant_directory(self, tenant: TenantId) -> Path:
         path = self.root / tenant.value
         try:
@@ -145,6 +144,23 @@ class PublicationReceiptStore:
         if not isinstance(parsed, dict):
             raise ValueError("publication receipt must be an object")
         return cast(dict[str, object], parsed)
+
+
+def encode_ingest_receipt(receipt: IngestReceipt) -> str:
+    return canonical_json({"schema": "knowledge-ingest-receipt-v1", "value": receipt})
+
+
+def decode_ingest_receipt(payload: str) -> IngestReceipt:
+    parsed = json.loads(payload, object_pairs_hook=_unique_object)
+    if canonical_json(parsed) != payload:
+        raise ValueError("ingest receipt JSON is not canonical")
+    if not isinstance(parsed, dict) or set(parsed) != {"schema", "value"}:
+        raise ValueError("ingest receipt envelope is invalid")
+    if parsed["schema"] != "knowledge-ingest-receipt-v1" or not isinstance(
+        parsed["value"], dict
+    ):
+        raise ValueError("ingest receipt schema is invalid")
+    return _ingest_receipt(cast(dict[str, object], parsed["value"]))
 
 
 @dataclass(frozen=True, slots=True)

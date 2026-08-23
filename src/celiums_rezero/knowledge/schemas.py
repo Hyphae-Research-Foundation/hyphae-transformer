@@ -258,6 +258,23 @@ class AcquisitionJob:
 
 
 @dataclass(frozen=True, slots=True)
+class JobLease:
+    tenant: TenantId
+    job_id: str
+    owner_id: str
+    fence: int
+    expires_at_us: int
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"job_[0-9a-f]{16}", self.job_id):
+            raise ValueError("lease job ID is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", self.owner_id):
+            raise ValueError("lease owner ID is invalid")
+        if self.fence < 1 or self.expires_at_us < 1:
+            raise ValueError("lease fence and expiry must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeResponse:
     status: str
     answer: str
@@ -466,6 +483,60 @@ class PublicationAuthorization:
             object.__setattr__(self, "authorization_id", expected)
         elif self.authorization_id != expected:
             raise ValueError("publication authorization ID does not match its contents")
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedIngest:
+    tenant: TenantId
+    job_id: str
+    corpus_generation: str
+    idempotency_key: str
+    mode: IngestMode
+    chunks: tuple[EmbeddedChunk, ...]
+    authorization: PublicationAuthorization | None = None
+    target: PublicationTarget | None = None
+    command_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"job_[0-9a-f]{16}", self.job_id):
+            raise ValueError("prepared ingest job ID is invalid")
+        if not self.corpus_generation or not re.fullmatch(
+            r"[0-9a-f]{64}", self.idempotency_key
+        ):
+            raise ValueError("prepared ingest generation or idempotency key is invalid")
+        if not isinstance(self.mode, IngestMode) or not self.chunks:
+            raise ValueError("prepared ingest mode and chunks are required")
+        chunk_ids = tuple(item.chunk.chunk_id for item in self.chunks)
+        if len(chunk_ids) != len(set(chunk_ids)):
+            raise ValueError("prepared ingest chunk IDs must be unique")
+        if self.mode is IngestMode.LIVE:
+            if self.authorization is None or self.target is None:
+                raise ValueError("live prepared ingest requires authorization and target")
+            if (
+                self.authorization.tenant != self.tenant
+                or self.authorization.target != self.target
+                or self.authorization.idempotency_key != self.idempotency_key
+                or self.authorization.chunk_ids != chunk_ids
+            ):
+                raise ValueError("prepared ingest does not match its authorization")
+        elif self.authorization is not None or self.target is not None:
+            raise ValueError("non-live prepared ingest cannot carry live authority")
+        identity = {
+            "schema": "knowledge-prepared-ingest-v1",
+            "tenant": self.tenant.value,
+            "job_id": self.job_id,
+            "corpus_generation": self.corpus_generation,
+            "idempotency_key": self.idempotency_key,
+            "mode": self.mode,
+            "chunks": self.chunks,
+            "authorization": self.authorization,
+            "target": self.target,
+        }
+        expected = content_hash(identity, length=64)
+        if self.command_digest is None:
+            object.__setattr__(self, "command_digest", expected)
+        elif self.command_digest != expected:
+            raise ValueError("prepared ingest digest does not match its contents")
 
 
 @dataclass(frozen=True, slots=True)
