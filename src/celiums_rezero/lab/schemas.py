@@ -11,7 +11,12 @@ from typing import Any
 
 from celiums_rezero.lab.serialization import content_hash
 
-RUNNERS = {"synthetic_v1", "continuous_byte_corpus_v1", "continuous_byte_corpus_v2"}
+RUNNERS = {
+    "synthetic_v1",
+    "continuous_byte_corpus_v1",
+    "continuous_byte_corpus_v2",
+    "governed_control_v1",
+}
 ID_PATTERN = re.compile(r"^[A-Z]-[0-9a-f]{12,16}$")
 
 

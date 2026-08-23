@@ -19,6 +19,7 @@ from celiums_rezero.data.prepare import (
     prepare_public_corpus,
     wikitext2_paths,
 )
+from celiums_rezero.knowledge.schemas import SufficiencyPolicy
 from celiums_rezero.lab.campaign import render_campaign_report, summarize_campaign
 from celiums_rezero.lab.registry import Registry
 from celiums_rezero.lab.runner import (
@@ -61,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     execute.add_argument("manifest", type=Path)
     execute.add_argument("--registry", type=Path, required=True)
     execute.add_argument("--data-root", type=Path)
+    execute.add_argument("--governed-dataset-manifest", type=Path)
 
     pilot = commands.add_parser("pilot-wikitext2", help="run a WikiText-2 campaign")
     pilot.add_argument("--data-root", type=Path, default=Path("data"))
@@ -226,6 +228,34 @@ def command_run_manifest(arguments: argparse.Namespace) -> int:
     if not isinstance(values, dict):
         raise TypeError("manifest JSON must contain an object")
     manifest = RunManifest.from_dict(values)
+    if manifest.config.get("runner") == "governed_control_v1":
+        if arguments.data_root is None or arguments.governed_dataset_manifest is None:
+            raise ValueError(
+                "governed control manifests require --data-root and dataset manifest"
+            )
+        import celiums_rezero.governed.schemas as governed_schemas
+        from celiums_rezero.governed.lab import run_registered_governed
+
+        dataset_values = json.loads(arguments.governed_dataset_manifest.read_text())
+        policy = SufficiencyPolicy(**dataset_values["policy"])
+        splits = tuple(
+            (name, governed_schemas.DatasetSplit(**item))
+            for name, item in sorted(dataset_values["splits"].items())
+        )
+        dataset_manifest = governed_schemas.GovernedDatasetManifest(
+            splits=splits,
+            policy=policy,
+            maximum_evidence_items=dataset_values["maximum_evidence_items"],
+            dataset_id=dataset_values["dataset_id"],
+        )
+        result = run_registered_governed(
+            Registry(arguments.registry),
+            manifest,
+            data_root=arguments.data_root,
+            dataset_manifest=dataset_manifest,
+        )
+        print(json.dumps(to_primitive(result), indent=2, sort_keys=True))
+        return 0 if result.failure is None else 1
     result = run_manifest(
         Registry(arguments.registry),
         manifest,
