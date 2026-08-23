@@ -1,6 +1,6 @@
-# Celiums ReZero
+# Hyphae Transformer
 
-Celiums ReZero is a from-scratch PyTorch framework for testing identity-initialized
+Hyphae Transformer is a from-scratch PyTorch framework for testing identity-initialized
 residual learning in modern decoder-only transformers. It contains two coupled
 products:
 
@@ -25,7 +25,7 @@ All strategies use the same attention, MLP, tokenizer, data, and training pipeli
 | `rezero_rms_shared` | RMSNorm | one shared scalar per block |
 | `crz_rms` | RMSNorm | separate attention and MLP scalars |
 
-The primary Celiums hypothesis is `crz_rms`:
+The primary gated-residual hypothesis is serialized as `crz_rms` for compatibility:
 
 ```text
 u       = x + alpha_attn * Attention(RMSNorm(x))
@@ -40,12 +40,12 @@ the gates receive a useful first-step gradient.
 ```bash
 uv sync --extra dev
 uv run pytest
-uv run celiums-rezero smoke-model --strategy crz_rms
-uv run celiums-rezero smoke-lab --root runs/smoke
-uv run celiums-rezero prepare-data wikitext2
-uv run celiums-rezero pilot-wikitext2 --device auto --seeds 7 17 29
-uv run celiums-rezero prepare-data enwiki8
-uv run celiums-rezero pilot-enwiki8 --device auto --seeds 7 17 29
+uv run hyphae-transformer smoke-model --strategy crz_rms
+uv run hyphae-transformer smoke-lab --root runs/smoke
+uv run hyphae-transformer prepare-data wikitext2
+uv run hyphae-transformer pilot-wikitext2 --device auto --seeds 7 17 29
+uv run hyphae-transformer prepare-data enwiki8
+uv run hyphae-transformer pilot-enwiki8 --device auto --seeds 7 17 29
 ```
 
 The WikiText-2 command downloads checksum-pinned splits from a fixed
@@ -80,6 +80,15 @@ outperformed Pre-RMS in the tested short pilots, while separate attention/MLP ga
 did not clear the preregistered minimum versus one shared gate. See
 [`docs/research-program.md`](docs/research-program.md) for the evidence and stop
 decision.
+
+The Python import namespace remains `celiums_rezero`, and the legacy
+`celiums-rezero`/`celiums-knowledge` commands remain available during the compatibility
+window. Historical manifests, checkpoints, protocol identifiers, metric names and
+`crz_rms` values are intentionally not rewritten.
+
+When upgrading from 0.1.0, uninstall the `celiums-rezero` distribution before installing
+`hyphae-transformer`. Both distributions provide the compatibility import namespace
+`celiums_rezero` and must not be co-installed.
 
 ## Research Contract
 

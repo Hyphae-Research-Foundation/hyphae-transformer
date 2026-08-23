@@ -5,8 +5,8 @@ set -eu
 : "${REGISTRY_ROOT:?Set REGISTRY_ROOT to the persistent artifact directory}"
 
 if [ -n "${DATA_ROOT:-}" ]; then
-  exec uv run --no-sync celiums-rezero run-manifest "$MANIFEST_PATH" \
+  exec uv run --no-sync hyphae-transformer run-manifest "$MANIFEST_PATH" \
     --registry "$REGISTRY_ROOT" --data-root "$DATA_ROOT"
 fi
 
-exec uv run --no-sync celiums-rezero run-manifest "$MANIFEST_PATH" --registry "$REGISTRY_ROOT"
+exec uv run --no-sync hyphae-transformer run-manifest "$MANIFEST_PATH" --registry "$REGISTRY_ROOT"

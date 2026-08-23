@@ -341,7 +341,7 @@ def render_campaign_report(
     document = f"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Celiums ReZero Campaign {html.escape(summary.campaign_id)}</title>
+<title>Hyphae Transformer Campaign {html.escape(summary.campaign_id)}</title>
 <style>
 body {{ font: 16px/1.5 system-ui, sans-serif; max-width: 1080px; margin: 3rem auto;
         padding: 0 1rem; color: #16211d; }}
@@ -350,7 +350,7 @@ table {{ border-collapse: collapse; width: 100%; }}
 th, td {{ border: 1px solid #b9c7c1; padding: .55rem; text-align: left; }}
 pre {{ background: #eef4f1; padding: 1rem; overflow: auto; }}
 </style>
-<h1>Celiums ReZero Campaign</h1>
+<h1>Hyphae Transformer Campaign</h1>
 <p><strong>Campaign:</strong> {html.escape(summary.campaign_id)}</p>
 <p><strong>Candidate verdict:</strong> {html.escape(summary.candidate_verdict.value)}</p>
 <p>Metric: {html.escape(summary.metric)}; baseline: {html.escape(summary.baseline)};

@@ -57,7 +57,7 @@ class CloudCampaignPlan:
     hourly_rate_usd: float
     max_lifetime_seconds: int
     max_cost_usd: float
-    remote_root: str = "/opt/celiums-rezero"
+    remote_root: str = "/opt/hyphae-transformer"
     remote_data_root: str = "/opt/celiums-data"
     remote_run_root: str = "/opt/celiums-runs/campaign"
 
@@ -218,7 +218,7 @@ def planned_commands(plan: CloudCampaignPlan) -> list[list[str]]:
             "--ssh-keys",
             plan.ssh_key_id,
             "--tag-names",
-            "celiums-rezero,training,gpu,ephemeral",
+            "hyphae-transformer,training,gpu,ephemeral",
             "--enable-monitoring",
             "--wait",
             "--output",
@@ -284,7 +284,7 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
                 [
                     "/root/.local/bin/uv",
                     "run",
-                    "celiums-rezero",
+                    "hyphae-transformer",
                     *plan.data_command,
                     "--root",
                     plan.remote_data_root,
@@ -299,7 +299,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
     command = [
         "/root/.local/bin/uv",
         "run",
-        "celiums-rezero",
+        "hyphae-transformer",
         *plan.campaign_command,
         "--data-root",
         plan.remote_data_root,

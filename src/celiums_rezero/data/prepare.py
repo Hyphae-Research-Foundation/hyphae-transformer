@@ -50,7 +50,7 @@ def download_file(
 ) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
-    request = urllib.request.Request(url, headers={"User-Agent": "celiums-rezero/0.1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "hyphae-transformer/0.1"})
     with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
         shutil.copyfileobj(response, output)
     if expected_sha256 is not None:
@@ -118,7 +118,7 @@ def wikitext2_paths(root: Path) -> tuple[Path, Path, Path]:
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         raise FileNotFoundError(
-            "WikiText-2 is not prepared; run `celiums-rezero prepare-data wikitext2`. "
+            "WikiText-2 is not prepared; run `hyphae-transformer prepare-data wikitext2`. "
             f"Missing: {', '.join(missing)}"
         )
     return paths
@@ -128,6 +128,6 @@ def enwiki8_path(root: Path) -> Path:
     path = root / "enwiki8" / "enwik8"
     if not path.is_file() or path.stat().st_size != ENWIKI8_SIZE:
         raise FileNotFoundError(
-            "enwiki8 is not prepared; run `celiums-rezero prepare-data enwiki8`."
+            "enwiki8 is not prepared; run `hyphae-transformer prepare-data enwiki8`."
         )
     return path

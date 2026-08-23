@@ -1,13 +1,13 @@
 cff-version: 1.2.0
-message: "If you use Celiums ReZero, cite this software and the original ReZero paper."
-title: "Celiums ReZero"
+message: "If you use Hyphae Transformer, cite this software and the original ReZero paper."
+title: "Hyphae Transformer"
 type: software
-version: 0.1.0
-date-released: 2026-08-21
+version: 0.2.0
+date-released: 2026-08-23
 authors:
   - family-names: Gutierrez
     given-names: Mario
-repository-code: "https://github.com/celiumsai/celiums-rezero"
+repository-code: "https://github.com/Hyphae-Research-Foundation/hyphae-transformer"
 license: MIT
 preferred-citation:
   type: conference-paper

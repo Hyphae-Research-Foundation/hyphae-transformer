@@ -24,9 +24,9 @@ jobs:
         run: uv build
       - name: Verify wheel installation
         run: |
-          uv venv /tmp/celiums-rezero-release
-          uv pip install --python /tmp/celiums-rezero-release/bin/python dist/*.whl
-          /tmp/celiums-rezero-release/bin/celiums-rezero --help
+          uv venv /tmp/hyphae-transformer-release
+          uv pip install --python /tmp/hyphae-transformer-release/bin/python dist/*.whl
+          /tmp/hyphae-transformer-release/bin/hyphae-transformer --help
       - uses: actions/upload-artifact@v4
         with:
           name: python-distributions
@@ -46,7 +46,9 @@ jobs:
       - uses: docker/metadata-action@v5
         id: metadata
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: |
+            ghcr.io/${{ github.repository }}
+            ghcr.io/celiumsai/celiums-rezero
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -76,4 +78,4 @@ jobs:
           --repo "${GITHUB_REPOSITORY}"
           --verify-tag
           --generate-notes
-          --title "Celiums ReZero ${GITHUB_REF_NAME}"
+          --title "Hyphae Transformer ${GITHUB_REF_NAME}"

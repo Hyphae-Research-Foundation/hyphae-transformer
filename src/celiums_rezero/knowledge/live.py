@@ -111,7 +111,7 @@ class PinnedHttpsTransport:
                 path,
                 headers={
                     "Host": host,
-                    "User-Agent": "celiums-rezero-knowledge/0.1",
+                    "User-Agent": "hyphae-transformer-knowledge/0.1",
                     "Accept-Encoding": "identity",
                     "Connection": "close",
                 },

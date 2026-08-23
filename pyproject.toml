@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "celiums-rezero"
-version = "0.1.0"
-description = "A modern ReZero research framework, decoder-only language model, and reproducible architecture lab"
+name = "hyphae-transformer"
+version = "0.2.0"
+description = "A governed transformer research framework, frozen-backbone control trainer, and reproducible architecture lab"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = { file = "LICENSE" }
@@ -34,11 +34,13 @@ dev = [
 ]
 
 [project.scripts]
+hyphae-transformer = "celiums_rezero.cli:main"
+hyphae-knowledge = "celiums_rezero.knowledge.cli:main"
 celiums-rezero = "celiums_rezero.cli:main"
 celiums-knowledge = "celiums_rezero.knowledge.cli:main"
 
 [project.urls]
-Repository = "https://github.com/celiumsai/celiums-rezero"
+Repository = "https://github.com/Hyphae-Research-Foundation/hyphae-transformer"
 Paper = "https://proceedings.mlr.press/v161/bachlechner21a.html"
 
 [tool.hatch.build.targets.wheel]

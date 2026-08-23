@@ -1,5 +1,5 @@
 [Unit]
-Description=Schedule Celiums knowledge worker for %i
+Description=Schedule Hyphae Transformer knowledge worker for %i
 
 [Timer]
 OnBootSec=30s

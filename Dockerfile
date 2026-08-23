@@ -5,4 +5,4 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-ENTRYPOINT ["uv", "run", "--no-sync", "celiums-rezero"]
+ENTRYPOINT ["uv", "run", "--no-sync", "hyphae-transformer"]
