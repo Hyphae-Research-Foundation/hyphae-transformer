@@ -194,6 +194,21 @@ def test_gemma_rocm_plan_is_strictly_allowlisted(tmp_path: Path) -> None:
     assert "gpu-mi355x1-288gb-spot" in create
 
 
+def test_gemma_rocm_executor_retrieves_only_smoke_evidence(tmp_path: Path) -> None:
+    cloud_plan = gemma_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    retrieval = next(command for command in runner.commands if command[0] == "scp")
+    assert retrieval[-2].endswith("/gemma4-e4b-smoke.json")
+    assert not any(command[0] == "rsync" for command in runner.commands)
+    assert (cloud_plan.artifact_directory / "gemma4-e4b-smoke.json").is_file()
+    assert (cloud_plan.artifact_directory / "bootstrap.stdout.log").is_file()
+    assert (cloud_plan.artifact_directory / "campaign.stdout.log").is_file()
+
+
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
     values = {
         field: getattr(plan(tmp_path), field)
@@ -206,3 +221,34 @@ def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
         assert "immutable source revision" in str(error)
     else:
         raise AssertionError("short cloud source revision was accepted")
+
+
+def gemma_plan(tmp_path: Path) -> CloudCampaignPlan:
+    return CloudCampaignPlan(
+        name="hyphae-e4b-control-smoke-x1",
+        region="mem1",
+        size="gpu-mi355x1-288gb-spot",
+        image="amddevelopercloud-pytorch2100rocm724",
+        ssh_key_id="1",
+        ssh_private_key=tmp_path / "key",
+        repository_url=(
+            "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git"
+        ),
+        revision="0123456789abcdef0123456789abcdef01234567",
+        data_command=("prepare-gemma4-e4b",),
+        campaign_command=(
+            "smoke-gemma4-e4b",
+            "--batch-sizes",
+            "1",
+            "2",
+            "4",
+            "8",
+            "--max-vram-gib",
+            "240",
+        ),
+        artifact_directory=tmp_path / "artifacts",
+        hourly_rate_usd=4.5,
+        max_lifetime_seconds=28_800,
+        max_cost_usd=36,
+        accelerator="amd-rocm",
+    )

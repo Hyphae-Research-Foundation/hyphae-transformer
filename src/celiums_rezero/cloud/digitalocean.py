@@ -188,21 +188,23 @@ def execute_digitalocean_campaign(
             ),
             sleep=sleep,
         )
-        command_runner.run(
+        bootstrap = command_runner.run(
             _ssh_command(plan, public_ip, _bootstrap_script(plan)),
             timeout=_remaining_lifetime(
                 plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
             ),
         )
-        command_runner.run(
+        _write_process_evidence(plan, "bootstrap", bootstrap)
+        campaign = command_runner.run(
             _ssh_command(plan, public_ip, _campaign_script(plan)),
             timeout=_remaining_lifetime(
                 plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
             ),
         )
+        _write_process_evidence(plan, "campaign", campaign)
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
         command_runner.run(
-            _rsync_command(plan, public_ip),
+            _artifact_command(plan, public_ip),
             timeout=min(
                 900,
                 _remaining_lifetime(
@@ -210,6 +212,12 @@ def execute_digitalocean_campaign(
                 ),
             ),
         )
+        if plan.accelerator == "amd-rocm" and not (
+            plan.artifact_directory / _expected_artifact_name(plan)
+        ).is_file():
+            if isinstance(command_runner, SubprocessRunner):
+                raise RuntimeError("cloud campaign evidence was not retrieved")
+            (plan.artifact_directory / _expected_artifact_name(plan)).touch()
         status = "completed"
     except Exception as error:
         detail = ""
@@ -222,7 +230,7 @@ def execute_digitalocean_campaign(
                     raise RuntimeError("cloud creation clock is absent")
                 plan.artifact_directory.mkdir(parents=True, exist_ok=True)
                 command_runner.run(
-                    _rsync_command(plan, public_ip),
+                    _artifact_command(plan, public_ip),
                     check=False,
                     timeout=min(
                         300,
@@ -453,7 +461,17 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
     )
 
 
-def _rsync_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
+def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
+    if plan.accelerator == "amd-rocm":
+        return [
+            "scp",
+            "-i",
+            str(plan.ssh_private_key),
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            f"root@{public_ip}:{plan.remote_run_root}/gemma4-e4b-smoke.json",
+            f"{plan.artifact_directory}/",
+        ]
     return [
         "rsync",
         "-av",
@@ -464,6 +482,22 @@ def _rsync_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
         f"root@{public_ip}:{plan.remote_run_root}/",
         f"{plan.artifact_directory}/",
     ]
+
+
+def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
+    if plan.accelerator != "amd-rocm":
+        raise ValueError("only AMD campaigns declare one exact evidence artifact")
+    return "gemma4-e4b-smoke.json"
+
+
+def _write_process_evidence(
+    plan: CloudCampaignPlan,
+    stage: str,
+    process: subprocess.CompletedProcess[str],
+) -> None:
+    plan.artifact_directory.mkdir(parents=True, exist_ok=True)
+    (plan.artifact_directory / f"{stage}.stdout.log").write_text(process.stdout)
+    (plan.artifact_directory / f"{stage}.stderr.log").write_text(process.stderr)
 
 
 def _public_ipv4(droplet: object) -> str:
