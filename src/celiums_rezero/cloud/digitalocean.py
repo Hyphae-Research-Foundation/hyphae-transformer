@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import shlex
@@ -203,7 +204,7 @@ def execute_digitalocean_campaign(
         )
         _write_process_evidence(plan, "campaign", campaign)
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
-        command_runner.run(
+        retrieval = command_runner.run(
             _artifact_command(plan, public_ip),
             timeout=min(
                 900,
@@ -212,12 +213,8 @@ def execute_digitalocean_campaign(
                 ),
             ),
         )
-        if plan.accelerator == "amd-rocm" and not (
-            plan.artifact_directory / _expected_artifact_name(plan)
-        ).is_file():
-            if isinstance(command_runner, SubprocessRunner):
-                raise RuntimeError("cloud campaign evidence was not retrieved")
-            (plan.artifact_directory / _expected_artifact_name(plan)).touch()
+        if plan.accelerator == "amd-rocm":
+            _write_retrieved_evidence(plan, retrieval)
         status = "completed"
     except Exception as error:
         detail = ""
@@ -229,7 +226,7 @@ def execute_digitalocean_campaign(
                 if created_clock is None:
                     raise RuntimeError("cloud creation clock is absent")
                 plan.artifact_directory.mkdir(parents=True, exist_ok=True)
-                command_runner.run(
+                retrieval = command_runner.run(
                     _artifact_command(plan, public_ip),
                     check=False,
                     timeout=min(
@@ -239,6 +236,8 @@ def execute_digitalocean_campaign(
                         ),
                     ),
                 )
+                if plan.accelerator == "amd-rocm" and retrieval.returncode == 0:
+                    _write_retrieved_evidence(plan, retrieval)
             except Exception:
                 pass
     finally:
@@ -317,11 +316,11 @@ def _wait_for_ssh(
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         result = runner.run(
-            _ssh_command(plan, public_ip, "true"),
+            _ssh_command(plan, public_ip, "printf __HYPHAE_READY__"),
             check=False,
             timeout=20,
         )
-        if result.returncode == 0:
+        if result.returncode == 0 and result.stdout.strip() == "__HYPHAE_READY__":
             return
         if callable(sleep):
             sleep(min(10, max(0, deadline - time.monotonic())))
@@ -463,15 +462,11 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
 
 def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
     if plan.accelerator == "amd-rocm":
-        return [
-            "scp",
-            "-i",
-            str(plan.ssh_private_key),
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            f"root@{public_ip}:{plan.remote_run_root}/gemma4-e4b-smoke.json",
-            f"{plan.artifact_directory}/",
-        ]
+        return _ssh_command(
+            plan,
+            public_ip,
+            f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-smoke.json",
+        )
     return [
         "rsync",
         "-av",
@@ -488,6 +483,19 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
     if plan.accelerator != "amd-rocm":
         raise ValueError("only AMD campaigns declare one exact evidence artifact")
     return "gemma4-e4b-smoke.json"
+
+
+def _write_retrieved_evidence(
+    plan: CloudCampaignPlan, process: subprocess.CompletedProcess[str]
+) -> None:
+    try:
+        payload = base64.b64decode(process.stdout, validate=True)
+        value = json.loads(payload)
+    except (ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError("retrieved cloud campaign evidence is invalid") from error
+    if not isinstance(value, dict) or value.get("passed") is not True:
+        raise RuntimeError("retrieved cloud campaign evidence did not pass")
+    (plan.artifact_directory / _expected_artifact_name(plan)).write_bytes(payload)
 
 
 def _write_process_evidence(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
 from pathlib import Path
@@ -81,8 +82,11 @@ class FakeRunner:
                 }
             ]
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
-        if command[0] == "ssh" and command[-1] == "true":
-            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[0] == "ssh" and command[-1] == "printf __HYPHAE_READY__":
+            return subprocess.CompletedProcess(command, 0, "__HYPHAE_READY__", "")
+        if command[0] == "ssh" and command[-1].startswith("base64 -w0 "):
+            payload = base64.b64encode(json.dumps({"passed": True}).encode()).decode()
+            return subprocess.CompletedProcess(command, 0, payload, "")
         if self.fail_delete and command[:4] == ["doctl", "compute", "droplet", "delete"]:
             raise subprocess.CalledProcessError(1, command, stderr="deletion failed")
         if command[:4] == ["doctl", "compute", "droplet", "get"]:
@@ -201,8 +205,10 @@ def test_gemma_rocm_executor_retrieves_only_smoke_evidence(tmp_path: Path) -> No
         cloud_plan, runner=runner, sleep=lambda _: None
     )
     assert summary.status == "completed"
-    retrieval = next(command for command in runner.commands if command[0] == "scp")
-    assert retrieval[-2].endswith("/gemma4-e4b-smoke.json")
+    retrieval = next(
+        command for command in runner.commands if command[-1].startswith("base64 -w0 ")
+    )
+    assert retrieval[-1].endswith("/gemma4-e4b-smoke.json")
     assert not any(command[0] == "rsync" for command in runner.commands)
     assert (cloud_plan.artifact_directory / "gemma4-e4b-smoke.json").is_file()
     assert (cloud_plan.artifact_directory / "bootstrap.stdout.log").is_file()
