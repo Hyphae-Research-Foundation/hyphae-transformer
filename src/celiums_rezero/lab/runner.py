@@ -63,6 +63,10 @@ def run_manifest(
     data_root: Path | None = None,
 ) -> RunResult:
     runner = manifest.config.get("runner")
+    if runner == "governed_control_v1":
+        raise ValueError(
+            "governed control manifests require run_registered_governed with a data root"
+        )
     if runner == "synthetic_v1":
         if data_root is not None:
             raise ValueError("synthetic manifests do not use a data root")

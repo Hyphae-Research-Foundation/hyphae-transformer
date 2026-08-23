@@ -1,0 +1,27 @@
+{
+  "baseline": "untrained_control_head",
+  "candidate": "trained_control_head_v1",
+  "claim": "A head over a frozen fixture backbone satisfies governed action and evidence gates.",
+  "external_validity": "Fixture contract only; no Gemma quality claim.",
+  "falsification": [
+    "Any primary gate fails.",
+    "Frozen features carry gradients or become non-finite.",
+    "Repeated training with the same seed changes model tensors."
+  ],
+  "gates": {
+    "abstention_recall": 1.0,
+    "action_accuracy": 0.9,
+    "answer_recall": 0.8,
+    "evidence_exact_match": 0.9,
+    "unsafe_answer_rate": 0.0
+  },
+  "schema": "governed-control-preregistration-v1",
+  "seed": 17,
+  "training": {
+    "device": "cpu",
+    "evidence_loss_weight": 1.0,
+    "epochs": 80,
+    "gradient_clip": 1.0,
+    "learning_rate": 0.03
+  }
+}
