@@ -1,0 +1,58 @@
+{
+  "dataset_id": "gtd_b7161eb4c1cf007dca96741ad8acffbe25cd9b6b46681fd48f19f21fde29332f",
+  "maximum_evidence_items": 8,
+  "policy": {
+    "allow_approximate": false,
+    "minimum_margin": 0.08,
+    "minimum_score": 0.72,
+    "minimum_trusted_hits": 1
+  },
+  "schema": "governed-trajectory-dataset-v1",
+  "source": {
+    "files": {
+      "dev.jsonl": "375151c56030482b64ad94d2ab82ef82a6e7650318a5777fdfdb08f913730553",
+      "evaluation-dev.jsonl": "740d2ddd4d2482ac8a8dda7975a4b2a2c8779efefa6b7b3b5af4b407c022c66f",
+      "evaluation-test.jsonl": "02cfa0dedd4949e1c9ccd0b610e260c20401e045b51825a1d0f7af71ff4be103",
+      "manifest.json": "a922359bba1d4a0dcd34b048f92728a6fcd83a59b5f1507e0beb00078347f3f0",
+      "test.jsonl": "f7716b01e8f123e9e891be0008c4d94f9b9a7ac539e4f2f2591d0598a1951b21",
+      "validation-report.json": "1dfba5e19392c3f39b0f8da40c48958dfa2a2ce058056941e773e2f76967dc76"
+    },
+    "license": "CC0-1.0",
+    "records_per_world": 19,
+    "score_contract": "supported-order:0.95-minus-0.10;otherwise:0.40",
+    "split_world_counts": {
+      "adversarial": 10,
+      "test": 20,
+      "train": 20,
+      "validation": 10
+    },
+    "split_world_ids_sha256": {
+      "adversarial": "6c117674f40377b92f28f53645501a66880b0c389a6e4261c6767b39eda85af7",
+      "test": "c3419a5abfe933c34f393d1699c6f02b000e6122a8663d66596a477e3b364a9f",
+      "train": "8047ca21f216d61a3dfb99bab07a50889dff0820164f7dd780ccc21a66bef99c",
+      "validation": "a512e3c6ea4627f600f0de80be00489bf4e2d955797fceae5bc8881dae4b0f94"
+    }
+  },
+  "splits": {
+    "adversarial": {
+      "path": "adversarial.jsonl",
+      "records": 190,
+      "sha256": "db43d68ae825f1d697a290d4889b0a4755b9738abd052222691426248514db81"
+    },
+    "test": {
+      "path": "test.jsonl",
+      "records": 380,
+      "sha256": "1c425d2960f59efbf6836136e83f6b2d93d2b05fb92134ce54f505008a509d06"
+    },
+    "train": {
+      "path": "train.jsonl",
+      "records": 380,
+      "sha256": "f35ad0f582d6a10d9e67875aeef9aaf77219dc4b5f3d0114e57993f6fd642b12"
+    },
+    "validation": {
+      "path": "validation.jsonl",
+      "records": 190,
+      "sha256": "4ec77b4e9e7f54eca2768f127742c8aa5609ca4c5bc6809368be75b3bce3940b"
+    }
+  }
+}

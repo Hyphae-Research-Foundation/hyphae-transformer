@@ -147,3 +147,19 @@ def test_conflict_and_blocked_targets_must_abstain() -> None:
         pass
     else:
         raise AssertionError("blocked target did not require abstention")
+
+
+def test_control_evaluation_uses_the_head_device() -> None:
+    class TrackingBackbone(FixtureBackboneV1):
+        def __init__(self) -> None:
+            self.devices: list[torch.device] = []
+
+        def encode(self, texts: tuple[str, ...], *, device: torch.device) -> torch.Tensor:
+            self.devices.append(device)
+            return super().encode(texts, device=device)
+
+    backbone = TrackingBackbone()
+    head = GovernedControlHead(backbone.hidden_size)
+    evaluate_control_head(backbone, head, records())
+    assert backbone.devices
+    assert set(backbone.devices) == {next(head.parameters()).device}

@@ -1,0 +1,26 @@
+{
+  "accelerator": "amd-rocm",
+  "artifact_directory": "artifacts/gemma4-e4b-mi355x1-smoke",
+  "campaign_command": [
+    "smoke-gemma4-e4b",
+    "--batch-sizes",
+    "1",
+    "2",
+    "4",
+    "8",
+    "--max-vram-gib",
+    "240"
+  ],
+  "data_command": ["prepare-gemma4-e4b"],
+  "hourly_rate_usd": 4.5,
+  "image": "amddevelopercloud-pytorch2100rocm724",
+  "max_cost_usd": 36.0,
+  "max_lifetime_seconds": 28800,
+  "name": "hyphae-e4b-control-smoke-x1",
+  "region": "mem1",
+  "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
+  "revision": "replace-with-merged-40-character-commit-sha",
+  "size": "gpu-mi355x1-288gb-spot",
+  "ssh_key_id": "55649085",
+  "ssh_private_key": "/home/mario/.ssh/celiums-workers"
+}

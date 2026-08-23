@@ -32,15 +32,22 @@ def evaluate_control_head(
     gates: dict[str, float] | None = None,
 ) -> ControlEvaluation:
     head.eval()
+    try:
+        device = next(head.parameters()).device
+    except StopIteration as error:
+        raise ValueError("control head has no parameters") from error
     batch = make_batch(
-        records, backbone, maximum_evidence_items=maximum_evidence_items, device=torch.device("cpu")
+        records,
+        backbone,
+        maximum_evidence_items=maximum_evidence_items,
+        device=device,
     )
     logits = head(batch.context, batch.evidence, batch.evidence_mask)
     actions, pointers = decode_control(
         logits,
         batch.evidence_mask,
-        blocked=torch.tensor([record.blocked for record in records]),
-        conflicting=torch.tensor([record.conflicting for record in records]),
+        blocked=torch.tensor([record.blocked for record in records], device=device),
+        conflicting=torch.tensor([record.conflicting for record in records], device=device),
     )
     action_accuracy = float((actions == batch.action_targets).float().mean())
     answer_index = list(ControlAction).index(ControlAction.ANSWER)

@@ -1,0 +1,91 @@
+{
+  "backbone": {
+    "architecture": "Gemma4ForConditionalGeneration",
+    "config_sha256": "33b10c02df3c2e8536cf323d29d53262aaa2f4d11dbe19bc729373fbe90295d4",
+    "expected_parameter_count": 7996156490,
+    "feature_contract": "gemma4-e4b-it-layer41-final-valid-token-f32-v1",
+    "hidden_layer": 41,
+    "hidden_size": 2560,
+    "model_id": "google/gemma-4-E4B-it",
+    "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "processor_config_sha256": "32bdf45d2ad4cc29a0822ddd157a182de76644f0419a6228d151495256e9813c",
+    "chat_template_sha256": "0a2c8073c878ab1da004bee933a998606537bbb62016310352c7285c3f01c5b5",
+    "generation_config_sha256": "d4226bbe3117d2d253ba4609720ba82c6c4ce4627a9a6ae05387c78983ac03de",
+    "model_safetensors_bytes": 15992595884,
+    "model_safetensors_sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503",
+    "tokenizer_json_bytes": 32169626,
+    "tokenizer_json_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f",
+    "tokenizer_config_sha256": "9f4fec4b1dc6ecddf8f4a92e9caea5971c0e67d81309f3f9066a2bee8c362633",
+    "transformers": "5.14.1"
+  },
+  "claim": "A governed action and evidence-pointer head over frozen Gemma 4 E4B IT satisfies all preregistered held-out and adversarial gates without changing the backbone.",
+  "dataset": {
+    "governed_dataset_id": "gtd_b7161eb4c1cf007dca96741ad8acffbe25cd9b6b46681fd48f19f21fde29332f",
+    "mars_release_manifest_sha256": "a922359bba1d4a0dcd34b048f92728a6fcd83a59b5f1507e0beb00078347f3f0",
+    "source": "MARS Training Data v2, deterministic CC0-1.0 fixtures",
+    "source_dev_sha256": "375151c56030482b64ad94d2ab82ef82a6e7650318a5777fdfdb08f913730553",
+    "source_evaluation_dev_sha256": "740d2ddd4d2482ac8a8dda7975a4b2a2c8779efefa6b7b3b5af4b407c022c66f",
+    "source_evaluation_test_sha256": "02cfa0dedd4949e1c9ccd0b610e260c20401e045b51825a1d0f7af71ff4be103",
+    "source_test_sha256": "f7716b01e8f123e9e891be0008c4d94f9b9a7ac539e4f2f2591d0598a1951b21",
+    "split_records": {
+      "adversarial": 190,
+      "test": 380,
+      "train": 380,
+      "validation": 190
+    },
+    "split_world_ids_sha256": {
+      "adversarial": "6c117674f40377b92f28f53645501a66880b0c389a6e4261c6767b39eda85af7",
+      "test": "c3419a5abfe933c34f393d1699c6f02b000e6122a8663d66596a477e3b364a9f",
+      "train": "8047ca21f216d61a3dfb99bab07a50889dff0820164f7dd780ccc21a66bef99c",
+      "validation": "a512e3c6ea4627f600f0de80be00489bf4e2d955797fceae5bc8881dae4b0f94"
+    },
+    "validation_report_sha256": "1dfba5e19392c3f39b0f8da40c48958dfa2a2ce058056941e773e2f76967dc76"
+  },
+  "falsification": [
+    "Any base-model parameter or buffer changes.",
+    "Any primary held-out or adversarial gate fails.",
+    "Checkpoint resume or same-seed replay changes semantic model state.",
+    "Any split or content leakage is found.",
+    "The x1 smoke exceeds 240 GiB peak VRAM or is non-finite."
+  ],
+  "gates": {
+    "abstention_recall": 1.0,
+    "action_accuracy": 0.9,
+    "answer_recall": 0.8,
+    "evidence_exact_match": 0.9,
+    "unsafe_answer_rate": 0.0
+  },
+  "hardware": {
+    "primary": {
+      "hourly_usd": 4.5,
+      "size": "gpu-mi355x1-288gb-spot",
+      "vram_gib": 288
+    },
+    "scale_only_if_required": {
+      "gpus": 8,
+      "hourly_usd": 36.0,
+      "size": "gpu-mi355x8-2304gb-spot",
+      "vram_gib": 2304
+    },
+    "x8_escalation_gate": "Escalate only if the x1 batch-size smoke is finite but cannot fit the preregistered effective batch or if measured throughput predicts lower total cost on x8."
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-governed-control-preregistration/v1",
+  "scope": "Frozen-backbone control-head training; no full-parameter Gemma update and no autonomous natural-generation claim.",
+  "structural_gates": {
+    "backbone_unchanged": true,
+    "maximum_peak_vram_gib": 240
+  },
+  "training": {
+    "batch_size_smoke": [1, 2, 4, 8],
+    "device": "cuda",
+    "epochs": 3,
+    "evidence_loss_weight": 1.0,
+    "gradient_clip": 1.0,
+    "gradient_checkpointing": false,
+    "head_learning_rate": 0.001,
+    "maximum_evidence_items": 8,
+    "maximum_length": 512,
+    "optimizer": "adamw",
+    "seeds": [17, 29, 43]
+  }
+}
