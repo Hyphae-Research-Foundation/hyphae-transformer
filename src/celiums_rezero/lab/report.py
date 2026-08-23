@@ -46,7 +46,7 @@ def render_run_report(
     document = f"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Celiums ReZero Run {html.escape(str(result.get('run_id', '')))}</title>
+<title>Hyphae Transformer Run {html.escape(str(result.get('run_id', '')))}</title>
 <style>
 body {{ font: 16px/1.5 system-ui, sans-serif; max-width: 960px; margin: 3rem auto;
         padding: 0 1rem; color: #16211d; }}
@@ -55,7 +55,7 @@ table {{ border-collapse: collapse; width: 100%; }}
 th, td {{ border: 1px solid #b9c7c1; padding: .55rem; text-align: left; }}
 pre {{ background: #eef4f1; padding: 1rem; overflow: auto; }}
 </style>
-<h1>Celiums ReZero Experiment</h1>
+<h1>Hyphae Transformer Experiment</h1>
 <p><strong>Run:</strong> {html.escape(str(result.get('run_id', '')))}</p>
 <p><strong>Verdict:</strong> {html.escape(str(result.get('verdict', '')))}</p>
 <p>{html.escape(str(result.get('summary', '')))}</p>

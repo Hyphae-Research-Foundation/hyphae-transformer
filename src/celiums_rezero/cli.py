@@ -37,7 +37,7 @@ from celiums_rezero.transformer.model import ReZeroLM
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="celiums-rezero")
+    parser = argparse.ArgumentParser(prog="hyphae-transformer")
     commands = parser.add_subparsers(dest="command", required=True)
 
     smoke_model = commands.add_parser("smoke-model", help="run a model forward/backward smoke")

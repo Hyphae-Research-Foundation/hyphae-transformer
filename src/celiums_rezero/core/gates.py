@@ -53,6 +53,6 @@ class ReZeroGate(nn.Module):
 
 
 def is_gate_parameter(parameter: nn.Parameter) -> bool:
-    """Return whether a parameter declares itself as a Celiums residual gate."""
+    """Return whether a parameter declares itself as a Hyphae Transformer residual gate."""
 
     return bool(getattr(parameter, "_celiums_gate", False))

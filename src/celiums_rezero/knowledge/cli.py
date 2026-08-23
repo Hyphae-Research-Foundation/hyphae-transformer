@@ -12,7 +12,7 @@ from celiums_rezero.knowledge.store import SQLiteTenantStore
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="celiums-knowledge")
+    parser = argparse.ArgumentParser(prog="hyphae-knowledge")
     commands = parser.add_subparsers(dest="command", required=True)
     preflight = commands.add_parser("preflight")
     preflight.add_argument("--database", type=Path, required=True)

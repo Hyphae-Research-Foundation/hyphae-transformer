@@ -47,12 +47,12 @@ three seeds before larger 60M and 150M rungs are approved.
 Build the pinned runtime and execute exactly one externally supplied manifest:
 
 ```bash
-docker build -t celiums-rezero:local .
+docker build -t hyphae-transformer:local .
 docker run --rm \
   -v "$PWD/manifest.json:/input/manifest.json:ro" \
   -v "$PWD/data:/data:ro" \
   -v "$PWD/runs:/output" \
-  celiums-rezero:local run-manifest /input/manifest.json \
+  hyphae-transformer:local run-manifest /input/manifest.json \
   --registry /output --data-root /data
 ```
 
@@ -75,13 +75,13 @@ maximum cost, SSH key, output path, data command, and campaign command. Verify t
 full lifecycle without provisioning:
 
 ```bash
-uv run celiums-rezero cloud-digitalocean cloud/plan.json --dry-run
+uv run hyphae-transformer cloud-digitalocean cloud/plan.json --dry-run
 ```
 
 Then execute only after the dry-run and preregistration are reviewed:
 
 ```bash
-uv run celiums-rezero cloud-digitalocean cloud/plan.json
+uv run hyphae-transformer cloud-digitalocean cloud/plan.json
 ```
 
 The executor writes `cloud-execution.json` beside the retrieved evidence with the

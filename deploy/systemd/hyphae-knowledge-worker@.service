@@ -1,0 +1,19 @@
+[Unit]
+Description=Hyphae Transformer knowledge one-shot worker for %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=hyphae-%i
+Group=hyphae-%i
+UMask=0077
+ExecStart=/opt/hyphae/bin/hyphae-knowledge worker-once --config /etc/hyphae/%i.json
+TimeoutStartSec=90
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/hyphae/%i /var/lib/node_exporter/textfile_collector
