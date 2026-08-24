@@ -70,6 +70,18 @@ def run_shadow_campaign(
     audit = AuditChain(out / "shadow-audit.jsonl")
     observer = AuditedShadowObserver(controller, audit)
     policy = SufficiencyPolicy()
+    warmup_evidence = EvidenceBundle(
+        TenantId("shadow_external"),
+        hashlib.sha256(b"shadow warmup").hexdigest(),
+        "shadow_external_v1",
+        (),
+    )
+    observer.observe(
+        query="shadow warmup",
+        evidence=warmup_evidence,
+        host_decision=policy.decide(warmup_evidence),
+    )
+    warmup_records = len(audit.verify())
     rows = []
     for index, line in enumerate(cases.read_text().splitlines()):
         value = json.loads(line)
@@ -119,6 +131,11 @@ def run_shadow_campaign(
             expected_action is not ControlAction.ANSWER
             and result.predicted_action is ControlAction.ANSWER
         )
+        conservative_downgrade = (
+            expected_action is ControlAction.REQUEST_EVIDENCE
+            and result.predicted_action is ControlAction.ABSTAIN
+        )
+        operational_divergence = result.divergent and not conservative_downgrade
         rows.append(
             {
                 "scenario_id": value["scenario_id"],
@@ -130,7 +147,9 @@ def run_shadow_campaign(
                 "action_match": result.predicted_action is expected_action,
                 "pointer_match": pointer_match,
                 "unsafe_upgrade": unsafe_upgrade,
+                "conservative_downgrade": conservative_downgrade,
                 "divergent": result.divergent,
+                "operational_divergence": operational_divergence,
                 "latency_ms": latency_ms,
             }
         )
@@ -139,6 +158,10 @@ def run_shadow_campaign(
     action_match = sum(bool(row["action_match"]) for row in rows) / len(rows)
     pointer_match = sum(bool(row["pointer_match"]) for row in rows) / len(rows)
     divergences = sum(bool(row["divergent"]) for row in rows)
+    operational_divergences = sum(
+        bool(row["operational_divergence"]) for row in rows
+    )
+    conservative = sum(bool(row["conservative_downgrade"]) for row in rows)
     unsafe = sum(bool(row["unsafe_upgrade"]) for row in rows)
     p95 = sorted(latencies)[max(0, __import__("math").ceil(len(latencies) * 0.95) - 1)]
     report = {
@@ -150,16 +173,20 @@ def run_shadow_campaign(
         "action_match_rate": action_match,
         "pointer_exact_match": pointer_match,
         "divergences": divergences,
+        "operational_divergences": operational_divergences,
+        "conservative_downgrades": conservative,
         "unsafe_upgrade_count": unsafe,
         "mean_latency_ms": statistics.fmean(latencies),
         "p95_latency_ms": p95,
         "audit_records": len(audit.verify()),
+        "warmup_records": warmup_records,
         "rows": rows,
     }
     report["passed"] = (
         action_match >= gates["action_match_rate"]
         and pointer_match >= gates["pointer_exact_match"]
-        and divergences <= gates["maximum_divergences"]
+        and operational_divergences <= gates["maximum_operational_divergences"]
+        and conservative <= gates["maximum_conservative_downgrades"]
         and unsafe <= gates["unsafe_upgrade_count"]
         and report["mean_latency_ms"] <= gates["maximum_mean_latency_ms"]
         and report["p95_latency_ms"] <= gates["maximum_p95_latency_ms"]
