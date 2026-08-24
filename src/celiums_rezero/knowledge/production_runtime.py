@@ -216,12 +216,15 @@ def _model_config(config: dict[str, object]) -> dict[str, object]:
 
 def _request_options_factory() -> Any:
     try:
-        from hyphae_sdk.v2 import RequestOptions
+        module = importlib.import_module("hyphae_sdk.v2")
     except ModuleNotFoundError as error:
         raise RuntimeError("production runtime requires hyphae-sdk==2.1.0") from error
+    request_options = getattr(module, "RequestOptions", None)
+    if request_options is None:
+        raise RuntimeError("Hyphae SDK has no v2 request options")
 
     def factory(timeout_seconds: float) -> object:
-        return RequestOptions(
+        return request_options(
             deadline_micros=int((time.time() + timeout_seconds) * 1_000_000)
         )
 
