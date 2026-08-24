@@ -215,7 +215,7 @@ def test_gemma_rocm_executor_retrieves_only_smoke_evidence(tmp_path: Path) -> No
     assert (cloud_plan.artifact_directory / "campaign.stdout.log").is_file()
 
 
-def test_gemma_rocm_bootstrap_discovers_the_image_python(tmp_path: Path) -> None:
+def test_gemma_rocm_bootstrap_uses_pinned_amd_container(tmp_path: Path) -> None:
     runner = FakeRunner()
     execute_digitalocean_campaign(gemma_plan(tmp_path), runner=runner, sleep=lambda _: None)
     bootstrap = next(
@@ -223,9 +223,10 @@ def test_gemma_rocm_bootstrap_discovers_the_image_python(tmp_path: Path) -> None
         for command in runner.commands
         if command[0] == "ssh" and "git clone" in command[-1]
     )
-    assert "/opt/venv/bin/python" in bootstrap
+    assert "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1" in bootstrap
+    assert "--device=/dev/kfd" in bootstrap
+    assert "/workspace/scripts/download_gemma4_e4b.py" in bootstrap
     assert "assert torch.version.hip" in bootstrap
-    assert 'uv venv --python "$ROCM_PYTHON" --system-site-packages' in bootstrap
 
 
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
