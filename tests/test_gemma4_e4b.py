@@ -100,6 +100,9 @@ def test_gemma_backbone_pools_last_unmasked_token_with_left_padding(
     assert features.shape == (2, 2560)
     assert features[:, 0].tolist() == [2.0, 12.0]
     assert not features.requires_grad
+    head = nn.Linear(2560, 1)
+    head(features).sum().backward()
+    assert head.weight.grad is not None
     assert all(not parameter.requires_grad for parameter in backbone.model.parameters())
 
 
