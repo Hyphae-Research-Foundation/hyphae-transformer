@@ -486,7 +486,7 @@ def _rocm_bootstrap_inner() -> str:
             (
                 "python -c \"import torch; assert torch.version.hip; "
                 "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
-                "assert 'MI355' in torch.cuda.get_device_name(0)\""
+                "assert 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName\""
             ),
             "python -m pip install transformers==5.14.1",
             "python -m pip install --no-deps -e /workspace",

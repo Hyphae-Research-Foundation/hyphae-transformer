@@ -101,8 +101,10 @@ def run_preflight(model: Path | None, *, require_gpu: bool) -> dict[str, object]
                 blockers.append("rocm_unavailable")
             if torch.cuda.device_count() != 1:
                 blockers.append("gpu_count_mismatch")
-            elif "MI355" not in torch.cuda.get_device_name(0):
-                blockers.append("gpu_model_mismatch")
+            elif "gfx950" not in getattr(
+                torch.cuda.get_device_properties(0), "gcnArchName", ""
+            ):
+                blockers.append("gpu_architecture_mismatch")
     except ModuleNotFoundError:
         blockers.append("torch_absent")
     try:
