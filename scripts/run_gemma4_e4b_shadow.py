@@ -18,6 +18,7 @@ from celiums_rezero.governed.deployment import (
 )
 from celiums_rezero.governed.gemma4 import Gemma4E4BFrozenBackbone
 from celiums_rezero.governed.schemas import ControlAction
+from celiums_rezero.knowledge.coordinator import normalize_query
 from celiums_rezero.knowledge.operations import AuditChain
 from celiums_rezero.knowledge.schemas import (
     EvidenceBundle,
@@ -73,7 +74,8 @@ def run_shadow_campaign(
     for index, line in enumerate(cases.read_text().splitlines()):
         value = json.loads(line)
         query = str(value["query"])
-        query_digest = hashlib.sha256(query.casefold().encode()).hexdigest()
+        normalized_query = normalize_query(query)
+        query_digest = hashlib.sha256(normalized_query.encode()).hexdigest()
         hits = tuple(
             EvidenceHit(
                 handle=f"passage_{index:08x}{hit_index:08x}",
@@ -97,7 +99,7 @@ def run_shadow_campaign(
         host_decision = policy.decide(evidence)
         started = time.perf_counter_ns()
         result = observer.observe(
-            query=query,
+            query=normalized_query,
             evidence=evidence,
             host_decision=host_decision,
         )
