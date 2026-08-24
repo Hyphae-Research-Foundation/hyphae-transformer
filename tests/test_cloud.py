@@ -91,12 +91,22 @@ class FakeRunner:
             import io
             import tarfile
 
-            report = json.dumps({"completed": True, "passed": False}).encode()
+            report_name = (
+                "shadow-report.json"
+                if "shadow" in command[-1]
+                else "./training-report.json"
+            )
+            report = json.dumps({"completed": True, "passed": True}).encode()
             archive_bytes = io.BytesIO()
             with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
-                item = tarfile.TarInfo("./training-report.json")
+                item = tarfile.TarInfo(report_name)
                 item.size = len(report)
                 archive.addfile(item, io.BytesIO(report))
+                if report_name == "shadow-report.json":
+                    audit = b"{}\n"
+                    audit_item = tarfile.TarInfo("shadow-audit.jsonl")
+                    audit_item.size = len(audit)
+                    archive.addfile(audit_item, io.BytesIO(audit))
             payload = base64.b64encode(archive_bytes.getvalue()).decode()
             return subprocess.CompletedProcess(command, 0, payload, "")
         if self.fail_delete and command[:4] == ["doctl", "compute", "droplet", "delete"]:
@@ -276,7 +286,7 @@ def test_gemma_training_plan_is_strict_and_retrieves_archive(tmp_path: Path) -> 
     report = json.loads(
         (cloud_plan.artifact_directory / "training-report.json").read_text()
     )
-    assert report == {"completed": True, "passed": False}
+    assert report == {"completed": True, "passed": True}
     campaign = next(
         command[-1]
         for command in runner.commands
@@ -317,6 +327,22 @@ def test_gemma_v3_training_plan_is_strict(tmp_path: Path) -> None:
     )
     assert "gemma4_e4b_governed_control_v3.json" in campaign
     assert "--epochs 200" in campaign
+
+
+def test_gemma_shadow_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_shadow_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "run_gemma4_e4b_shadow.py" in command[-1]
+    )
+    assert "--bundle-sha256 93db742e" in campaign
+    assert (cloud_plan.artifact_directory / "shadow-report.json").is_file()
 
 
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
@@ -457,3 +483,29 @@ def gemma_v3_training_plan(tmp_path: Path) -> CloudCampaignPlan:
         ),
     )
     return CloudCampaignPlan(**values)
+
+
+def gemma_shadow_plan(tmp_path: Path) -> CloudCampaignPlan:
+    return CloudCampaignPlan(
+        name="hyphae-e4b-shadow-external-v1",
+        region="mem1",
+        size="gpu-mi355x1-288gb-spot",
+        image="amddevelopercloud-pytorch2100rocm724",
+        ssh_key_id="1",
+        ssh_private_key=tmp_path / "key",
+        repository_url=(
+            "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git"
+        ),
+        revision="0123456789abcdef0123456789abcdef01234567",
+        data_command=("prepare-gemma4-e4b",),
+        campaign_command=(
+            "shadow-gemma4-e4b-v1",
+            "--bundle-sha256",
+            "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
+        ),
+        artifact_directory=tmp_path / "artifacts-shadow",
+        hourly_rate_usd=4.5,
+        max_lifetime_seconds=7200,
+        max_cost_usd=9,
+        accelerator="amd-rocm",
+    )

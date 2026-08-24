@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from celiums_rezero.governed import (
+    AuditedShadowObserver,
     ControlAction,
     GovernedControlHead,
     build_deployment_bundle,
@@ -15,6 +16,7 @@ from celiums_rezero.governed import (
     load_deployment_bundle,
 )
 from celiums_rezero.governed.backbone import FixtureBackboneV1
+from celiums_rezero.knowledge.operations import AuditChain
 from celiums_rezero.knowledge.schemas import (
     EvidenceBundle,
     EvidenceHit,
@@ -166,3 +168,32 @@ def test_bundle_loader_rejects_tampering(tmp_path: Path) -> None:
             backbone=FixtureBackboneV1(),
             device=torch.device("cpu"),
         )
+
+
+def test_audited_shadow_observer_appends_result(tmp_path: Path) -> None:
+    class Controller:
+        def observe(self, **_values):
+            from celiums_rezero.governed.deployment import ShadowControlResult
+
+            return ShadowControlResult(
+                "hyphae-transformer.governed-control-shadow/v1",
+                SufficiencyDecision.ABSENT,
+                ControlAction.REQUEST_EVIDENCE,
+                (),
+                0.9,
+                False,
+                "gcb_fixture",
+            )
+
+    chain = AuditChain(tmp_path / "audit.jsonl")
+    observer = AuditedShadowObserver(Controller(), chain)  # type: ignore[arg-type]
+    evidence = EvidenceBundle(TenantId("tenant_a"), "0" * 64, "generation", ())
+    observer.observe(
+        query="question",
+        evidence=evidence,
+        host_decision=SufficiencyDecision.ABSENT,
+    )
+    records = chain.verify()
+    assert len(records) == 1
+    assert records[0].outcome == "matched"
+    assert records[0].detail["bundle_id"] == "gcb_fixture"

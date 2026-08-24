@@ -95,6 +95,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b",
             "train-gemma4-e4b-v2",
             "train-gemma4-e4b-v3",
+            "shadow-gemma4-e4b-v1",
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
@@ -106,6 +107,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b",
                 "train-gemma4-e4b-v2",
                 "train-gemma4-e4b-v3",
+                "shadow-gemma4-e4b-v1",
             }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
@@ -128,6 +130,8 @@ class CloudCampaignPlan:
             _validate_gemma_v2_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-v3":
             _validate_gemma_v3_training_command(self.campaign_command)
+        if self.campaign_command[0] == "shadow-gemma4-e4b-v1":
+            _validate_gemma_shadow_command(self.campaign_command)
         for value in (
             self.remote_root,
             self.remote_data_root,
@@ -411,6 +415,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b",
         "train-gemma4-e4b-v2",
         "train-gemma4-e4b-v3",
+        "shadow-gemma4-e4b-v1",
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
@@ -425,7 +430,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/runs/gemma4-e4b-smoke.json",
                 *plan.campaign_command[1:],
             ]
-        else:
+        elif plan.campaign_command[0].startswith("train-gemma4-e4b"):
             version = plan.campaign_command[0].rsplit("-", 1)[-1]
             if version not in {"v2", "v3"}:
                 version = "v1"
@@ -441,6 +446,22 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                     "/workspace/experiments/canonical/"
                     f"gemma4_e4b_governed_control_{version}.json"
                 ),
+                "--out",
+                "/runs",
+                *plan.campaign_command[1:],
+            ]
+        else:
+            command = [
+                "python",
+                "/workspace/scripts/run_gemma4_e4b_shadow.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--bundle",
+                "/data/gemma4-e4b-control-v3-seed17.tar.gz",
+                "--cases",
+                "/workspace/experiments/shadow/external-v1/cases.jsonl",
+                "--preregistration",
+                "/workspace/experiments/canonical/gemma4_e4b_shadow_external_v1.json",
                 "--out",
                 "/runs",
                 *plan.campaign_command[1:],
@@ -480,6 +501,11 @@ def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
     if plan.accelerator == "amd-rocm":
         if plan.campaign_command[0].startswith("train-gemma4-e4b"):
             artifact = f"tar -C {plan.remote_run_root} -czf - . | base64 -w0"
+        elif plan.campaign_command[0] == "shadow-gemma4-e4b-v1":
+            artifact = (
+                f"tar -C {plan.remote_run_root} -czf - "
+                "shadow-report.json shadow-audit.jsonl | base64 -w0"
+            )
         else:
             artifact = f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-smoke.json"
         return _ssh_command(
@@ -505,6 +531,8 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
     return (
         "gemma4-e4b-training.tar.gz"
         if plan.campaign_command[0].startswith("train-gemma4-e4b")
+        else "gemma4-e4b-shadow.tar.gz"
+        if plan.campaign_command[0] == "shadow-gemma4-e4b-v1"
         else "gemma4-e4b-smoke.json"
     )
 
@@ -545,6 +573,12 @@ def _rocm_bootstrap_inner() -> str:
             ),
             "python -m pip install --target /python transformers==5.14.1",
             (
+                "curl -LsSf -o /data/gemma4-e4b-control-v3-seed17.tar.gz "
+                "https://github.com/Hyphae-Research-Foundation/hyphae-transformer/"
+                "releases/download/governed-control-v3.0.0/"
+                "gemma4-e4b-control-v3-seed17.tar.gz"
+            ),
+            (
                 "PYTHONPATH=/python python /workspace/scripts/download_gemma4_e4b.py "
                 "--out /data/gemma4-e4b"
             ),
@@ -570,6 +604,18 @@ def _write_retrieved_evidence(
                     raise ValueError("training report is absent")
                 value = json.loads(source.read())
                 completed = isinstance(value, dict) and value.get("completed") is True
+        elif plan.campaign_command[0] == "shadow-gemma4-e4b-v1":
+            with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
+                member = archive.getmember("shadow-report.json")
+                source = archive.extractfile(member)
+                if source is None or not member.isfile():
+                    raise ValueError("shadow report is absent")
+                value = json.loads(source.read())
+                completed = (
+                    isinstance(value, dict)
+                    and value.get("completed") is True
+                    and value.get("passed") is True
+                )
         else:
             value = json.loads(payload)
             completed = isinstance(value, dict) and value.get("passed") is True
@@ -580,6 +626,10 @@ def _write_retrieved_evidence(
     (plan.artifact_directory / _expected_artifact_name(plan)).write_bytes(payload)
     if plan.campaign_command[0].startswith("train-gemma4-e4b"):
         (plan.artifact_directory / "training-report.json").write_text(
+            json.dumps(value, indent=2, sort_keys=True) + "\n"
+        )
+    elif plan.campaign_command[0] == "shadow-gemma4-e4b-v1":
+        (plan.artifact_directory / "shadow-report.json").write_text(
             json.dumps(value, indent=2, sort_keys=True) + "\n"
         )
 
@@ -732,6 +782,15 @@ def _validate_gemma_v3_training_command(command: tuple[str, ...]) -> None:
         "0.5",
     ):
         raise ValueError("Gemma E4B v3 training command differs from preregistration")
+
+
+def _validate_gemma_shadow_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "shadow-gemma4-e4b-v1",
+        "--bundle-sha256",
+        "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
+    ):
+        raise ValueError("Gemma E4B shadow command differs from preregistration")
 
 
 def _remaining_lifetime(

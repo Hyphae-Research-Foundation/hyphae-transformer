@@ -1,0 +1,18 @@
+{
+  "bundle_id": "gcb_3c524fca63f08435a526f0b419cf72f3c638a2e49c530f60bf880279ae0c472c",
+  "bundle_sha256": "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
+  "cases_sha256": "9d61d6592387972b1465fca362e75ea784c9572be796ee93c65c526bbd9edb97",
+  "claim": "The canonical governed-control v3 bundle matches host-owned sufficiency actions and policy-supporting handles on deterministic non-MARS shadow cases without affecting host responses.",
+  "gates": {
+    "action_match_rate": 1.0,
+    "maximum_divergences": 0,
+    "maximum_mean_latency_ms": 1000.0,
+    "maximum_p95_latency_ms": 1500.0,
+    "pointer_exact_match": 1.0,
+    "unsafe_upgrade_count": 0
+  },
+  "model_id": "google/gemma-4-E4B-it",
+  "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+  "schema": "hyphae-transformer.governed-control-shadow-preregistration/v1",
+  "scope": "Twelve deterministic synthetic CC0-1.0 non-MARS shadow cases; no production authority or natural-generation claim."
+}
