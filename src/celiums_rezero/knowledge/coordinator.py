@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from celiums_rezero.governed.deployment import ShadowObserver
 
 from celiums_rezero.knowledge.schemas import (
     NO_KNOWLEDGE_MESSAGE,
@@ -32,6 +35,7 @@ class KnowledgeCoordinator:
         acquisition: AcquisitionPolicy,
         store: JobStore,
         embedding_profile: str,
+        shadow: ShadowObserver | None = None,
     ) -> None:
         if not embedding_profile:
             raise ValueError("embedding profile is required")
@@ -39,6 +43,7 @@ class KnowledgeCoordinator:
         self.acquisition = acquisition
         self.store = store
         self.embedding_profile = embedding_profile
+        self.shadow = shadow
 
     def answer_or_enqueue(
         self,
@@ -53,6 +58,8 @@ class KnowledgeCoordinator:
         if evidence.tenant != tenant or evidence.query_digest != query_digest:
             raise ValueError("evidence is not bound to this tenant and query")
         decision = self.sufficiency.decide(evidence)
+        if self.shadow is not None:
+            self.shadow.observe(query=normalized, evidence=evidence, host_decision=decision)
         if decision is SufficiencyDecision.SUPPORTED:
             handles = tuple(hit.handle for hit in evidence.hits if hit.active and hit.trusted)
             return KnowledgeResponse(

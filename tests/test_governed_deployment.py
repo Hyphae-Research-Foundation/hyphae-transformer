@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+import torch
+
+from celiums_rezero.governed import (
+    ControlAction,
+    GovernedControlHead,
+    build_deployment_bundle,
+    inspect_deployment_bundle,
+    load_deployment_bundle,
+)
+from celiums_rezero.governed.backbone import FixtureBackboneV1
+from celiums_rezero.knowledge.schemas import (
+    EvidenceBundle,
+    EvidenceHit,
+    SufficiencyDecision,
+    TenantId,
+)
+
+
+def test_bundle_build_load_and_shadow_observation(tmp_path: Path) -> None:
+    backbone = FixtureBackboneV1()
+    head = GovernedControlHead(
+        backbone.hidden_size,
+        normalized_features=True,
+        pointer_policy_score=0.72,
+        pointer_policy_scale=20,
+        use_host_control_features=True,
+    )
+    with torch.no_grad():
+        head.context.weight.zero_()
+        head.evidence.weight.zero_()
+        head.action.weight.zero_()
+        head.action.bias.zero_()
+        head.action.weight[0, backbone.hidden_size + 3] = 10
+    checkpoint = tmp_path / "control-head.pt"
+    torch.save(
+        {
+            "version": 1,
+            "head": head.state_dict(),
+            "optimizer": {},
+            "config": {},
+            "backbone": json.dumps(
+                {
+                    "family": backbone.identity.family,
+                    "model_id": backbone.identity.model_id,
+                    "revision": backbone.identity.revision,
+                    "artifact_manifest_sha256": backbone.identity.artifact_manifest_sha256,
+                    "tokenizer_manifest_sha256": backbone.identity.tokenizer_manifest_sha256,
+                    "runtime_version": backbone.identity.runtime_version,
+                    "feature_contract": backbone.identity.feature_contract,
+                    "hidden_size": backbone.identity.hidden_size,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "backbone_state": backbone.state_fingerprint(),
+            "maximum_evidence_items": 8,
+            "action_order": ["answer", "request_evidence", "abstain"],
+            "record_digest": "0" * 64,
+        },
+        checkpoint,
+    )
+    report = tmp_path / "training-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "passed": True,
+                "model_id": backbone.identity.model_id,
+                "model_revision": backbone.identity.revision,
+                "dataset_id": "gtd_fixture",
+                "seeds": [
+                    {
+                        "seed": 17,
+                        "passed": True,
+                        "training": {
+                            "checkpoint_sha256": hashlib.sha256(
+                                checkpoint.read_bytes()
+                            ).hexdigest()
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    preregistration = tmp_path / "preregistration.json"
+    preregistration.write_text(
+        json.dumps(
+            {
+                "backbone": {"feature_contract": backbone.identity.feature_contract},
+                "dataset": {"governed_dataset_id": "gtd_fixture"},
+                "training": {
+                    "maximum_evidence_items": 8,
+                    "pointer_rank": 32,
+                    "normalized_features": True,
+                    "use_evidence_scores": False,
+                    "use_host_control_features": True,
+                    "pointer_policy_score": 0.72,
+                    "pointer_policy_scale": 20,
+                    "pointer_threshold": 0.5,
+                    "minimum_confidence": 0.5,
+                },
+            }
+        )
+    )
+    dataset = tmp_path / "dataset-manifest.json"
+    dataset.write_text(json.dumps({"dataset_id": "gtd_fixture"}))
+    bundle = tmp_path / "bundle.tar.gz"
+    manifest = build_deployment_bundle(
+        output=bundle,
+        checkpoint=checkpoint,
+        training_report=report,
+        preregistration=preregistration,
+        dataset_manifest=dataset,
+        source_revision="1" * 40,
+    )
+    second = tmp_path / "second.tar.gz"
+    build_deployment_bundle(
+        output=second,
+        checkpoint=checkpoint,
+        training_report=report,
+        preregistration=preregistration,
+        dataset_manifest=dataset,
+        source_revision="1" * 40,
+    )
+    assert second.read_bytes() == bundle.read_bytes()
+    assert inspect_deployment_bundle(bundle) == manifest
+    controller = load_deployment_bundle(
+        bundle,
+        expected_bundle_sha256=hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        backbone=backbone,
+        device=torch.device("cpu"),
+    )
+    text = "supported"
+    hit = EvidenceHit(
+        "passage_0123456789abcdef",
+        "docs",
+        "v1",
+        text,
+        0.95,
+        hashlib.sha256(text.encode()).hexdigest(),
+    )
+    result = controller.observe(
+        query="question",
+        evidence=EvidenceBundle(TenantId("tenant_a"), "0" * 64, "generation", (hit,)),
+        host_decision=SufficiencyDecision.SUPPORTED,
+    )
+    assert result.predicted_action is ControlAction.ANSWER
+    assert result.selected_handles == (hit.handle,)
+    assert not result.divergent
+
+
+def test_bundle_loader_rejects_tampering(tmp_path: Path) -> None:
+    path = tmp_path / "not-a-bundle.tar.gz"
+    path.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="digest"):
+        load_deployment_bundle(
+            path,
+            expected_bundle_sha256="0" * 64,
+            backbone=FixtureBackboneV1(),
+            device=torch.device("cpu"),
+        )

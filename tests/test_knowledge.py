@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,6 +85,36 @@ def test_supported_evidence_does_not_create_a_job() -> None:
     assert response.decision is SufficiencyDecision.SUPPORTED
     assert response.job_id is None
     assert response.evidence_handles
+
+
+def test_shadow_observer_cannot_change_host_response() -> None:
+    tenant = TenantId("tenant_a")
+    evidence = bundle(tenant, "How does the API work?", (0.91, 0.72))
+
+    class Shadow:
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def observe(self, **values):
+            self.calls.append(values)
+            return SimpleNamespace(divergent=True)
+
+    shadow = Shadow()
+    item = KnowledgeCoordinator(
+        sufficiency=SufficiencyPolicy(minimum_score=0.7, minimum_margin=0.05),
+        acquisition=AcquisitionPolicy(version="policy-v1", sources=(source_policy(),)),
+        store=InMemoryTenantStore(),
+        embedding_profile="bge-m3@sha256:fixture",
+        shadow=shadow,
+    )
+    response = item.answer_or_enqueue(
+        tenant=tenant,
+        query="How does the API work?",
+        evidence=evidence,
+        source_id="official_docs",
+    )
+    assert response.status == "evidence_ready"
+    assert len(shadow.calls) == 1
 
 
 def test_absent_evidence_enqueues_one_deduplicated_async_job() -> None:
