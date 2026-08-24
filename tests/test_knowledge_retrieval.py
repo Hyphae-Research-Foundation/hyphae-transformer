@@ -77,6 +77,17 @@ def search_response(*, score: float = 0.92, body: str = "Verified documentation"
                     },
                 }
             ],
+            "vector_branches": [
+                {
+                    "target": "semantic",
+                    "strategy": "exact_filtered",
+                    "approximate": False,
+                    "exact_reranked": True,
+                    "eligible_documents": 1,
+                    "candidate_count": 1,
+                    "visited_nodes": 0,
+                }
+            ],
             "approximate": False,
         },
     )
@@ -91,6 +102,7 @@ def gateway(client: FakeHyphaeClient, tenant: str = "tenant_a") -> HyphaeRetriev
             corpus_generation="generation-v1",
             vector_target="semantic",
             score_scale=1.0,
+            require_exact_vector_receipt=True,
         ),
         embedder=FakeEmbedder(),
     )
@@ -143,6 +155,16 @@ def test_gateway_fails_closed_on_unhydrated_or_tampered_hits(mutator: object) ->
     assert callable(mutator)
     mutator(values)
     with pytest.raises(RetrievalContractError):
+        gateway(FakeHyphaeClient(FakeResponse("integrated_search", values))).retrieve(
+            TenantId("tenant_a"), "question"
+        )
+
+
+def test_gateway_rejects_non_exact_vector_receipt() -> None:
+    values = search_response().value
+    assert isinstance(values, dict)
+    values["vector_branches"][0]["strategy"] = "filter_aware_ann"
+    with pytest.raises(RetrievalContractError, match="not exact"):
         gateway(FakeHyphaeClient(FakeResponse("integrated_search", values))).retrieve(
             TenantId("tenant_a"), "question"
         )
@@ -206,7 +228,18 @@ def test_approximate_search_is_partial_under_exact_only_policy() -> None:
     values = search_response().value
     assert isinstance(values, dict)
     values["approximate"] = True
-    retriever = gateway(FakeHyphaeClient(FakeResponse("integrated_search", values)))
+    retriever = HyphaeRetrievalGateway(
+        tenant=TenantId("tenant_a"),
+        client=FakeHyphaeClient(FakeResponse("integrated_search", values)),
+        config=RetrievalConfig(
+            collection=41,
+            corpus_generation="generation-v1",
+            vector_target="semantic",
+            score_scale=1.0,
+            require_exact_vector_receipt=False,
+        ),
+        embedder=FakeEmbedder(),
+    )
     tenant = TenantId("tenant_a")
     coordinator = KnowledgeCoordinator(
         sufficiency=SufficiencyPolicy(minimum_score=0.7, allow_approximate=False),

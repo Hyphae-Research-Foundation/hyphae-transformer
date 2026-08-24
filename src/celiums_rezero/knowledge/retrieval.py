@@ -54,6 +54,7 @@ class RetrievalConfig:
     lexical_weight: int = 1
     vector_weight: int = 1
     score_scale: float = 1.0
+    require_exact_vector_receipt: bool = False
 
     def __post_init__(self) -> None:
         if self.collection < 1 or not self.corpus_generation:
@@ -69,6 +70,8 @@ class RetrievalConfig:
             raise ValueError("retrieval branch weights must be positive")
         if not isfinite(self.score_scale) or self.score_scale <= 0:
             raise ValueError("score scale must be finite and positive")
+        if self.require_exact_vector_receipt and self.vector_target is None:
+            raise ValueError("exact vector receipt requires a vector target")
         fields = (
             self.body_field,
             self.source_id_field,
@@ -152,6 +155,23 @@ class HyphaeRetrievalGateway:
         if not isinstance(hits, list):
             raise RetrievalContractError("Hyphae search result has no bounded hit list")
         hydrated = tuple(self._hit(hit) for hit in hits)
+        approximate = value.get("approximate", False)
+        if not isinstance(approximate, bool):
+            raise RetrievalContractError("Hyphae approximation evidence is invalid")
+        if self.config.require_exact_vector_receipt:
+            branches = value.get("vector_branches")
+            if not isinstance(branches, list) or len(branches) != 1:
+                raise RetrievalContractError("Hyphae exact vector receipt is absent")
+            branch = branches[0]
+            if (
+                not isinstance(branch, dict)
+                or branch.get("target") != self.config.vector_target
+                or branch.get("strategy") != "exact_filtered"
+                or branch.get("approximate") is not False
+                or branch.get("exact_reranked") is not True
+                or approximate
+            ):
+                raise RetrievalContractError("Hyphae vector execution was not exact")
         snapshot = value.get("snapshot")
         if not isinstance(snapshot, dict):
             raise RetrievalContractError("Hyphae search result has no snapshot identity")
@@ -170,7 +190,7 @@ class HyphaeRetrievalGateway:
             corpus_generation=self.config.corpus_generation,
             hits=hydrated,
             snapshot_fingerprint=fingerprint,
-            approximate=bool(value.get("approximate", False)),
+            approximate=approximate,
         )
 
     def _hit(self, hit: object) -> EvidenceHit:
