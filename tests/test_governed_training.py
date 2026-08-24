@@ -15,7 +15,7 @@ from celiums_rezero.governed import (
     TrajectoryStep,
     train_control_head,
 )
-from celiums_rezero.governed.data import load_trajectory_split
+from celiums_rezero.governed.data import load_trajectory_split, materialize_governed_batch
 from celiums_rezero.governed.evaluation import evaluate_control_head
 from celiums_rezero.knowledge.schemas import EvidenceHit, SufficiencyPolicy
 from celiums_rezero.lab.serialization import canonical_json
@@ -163,3 +163,23 @@ def test_control_evaluation_uses_the_head_device() -> None:
     evaluate_control_head(backbone, head, records())
     assert backbone.devices
     assert set(backbone.devices) == {next(head.parameters()).device}
+
+
+def test_materialized_batch_matches_direct_batch() -> None:
+    backbone = FixtureBackboneV1()
+    direct = materialize_governed_batch(
+        records(),
+        backbone,
+        maximum_evidence_items=8,
+        feature_batch_size=len(records()),
+        device=torch.device("cpu"),
+    )
+    chunked = materialize_governed_batch(
+        records(),
+        backbone,
+        maximum_evidence_items=8,
+        feature_batch_size=5,
+        device=torch.device("cpu"),
+    )
+    for field in direct.__slots__:
+        torch.testing.assert_close(getattr(direct, field), getattr(chunked, field))

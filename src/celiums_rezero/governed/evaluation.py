@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import torch
 
 from celiums_rezero.governed.backbone import FrozenTextBackbone
-from celiums_rezero.governed.data import make_batch
+from celiums_rezero.governed.data import GovernedBatch, make_batch
 from celiums_rezero.governed.model import GovernedControlHead, decode_control
 from celiums_rezero.governed.schemas import ControlAction, TrajectoryStep
 
@@ -30,18 +30,22 @@ def evaluate_control_head(
     *,
     maximum_evidence_items: int = 8,
     gates: dict[str, float] | None = None,
+    batch: GovernedBatch | None = None,
 ) -> ControlEvaluation:
     head.eval()
     try:
         device = next(head.parameters()).device
     except StopIteration as error:
         raise ValueError("control head has no parameters") from error
-    batch = make_batch(
-        records,
-        backbone,
-        maximum_evidence_items=maximum_evidence_items,
-        device=device,
-    )
+    if batch is None:
+        batch = make_batch(
+            records,
+            backbone,
+            maximum_evidence_items=maximum_evidence_items,
+            device=device,
+        )
+    elif batch.action_targets.shape != (len(records),) or batch.context.device != device:
+        raise ValueError("precomputed governed evaluation batch is invalid")
     logits = head(batch.context, batch.evidence, batch.evidence_mask)
     actions, pointers = decode_control(
         logits,
