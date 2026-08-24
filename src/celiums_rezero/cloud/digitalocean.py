@@ -244,6 +244,7 @@ def execute_digitalocean_campaign(
             _write_failed_process_evidence(plan, "campaign", error)
             raise
         _write_process_evidence(plan, "campaign", campaign)
+        _validate_remote_source_patch(plan, public_ip, command_runner)
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
         retrieval = command_runner.run(
             _artifact_command(plan, public_ip),
@@ -574,6 +575,26 @@ def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
         f"root@{public_ip}:{plan.remote_run_root}/",
         f"{plan.artifact_directory}/",
     ]
+
+
+def _validate_remote_source_patch(
+    plan: CloudCampaignPlan,
+    public_ip: str,
+    runner: CommandRunner,
+) -> None:
+    if plan.campaign_command[0] != "canary-gemma4-e4b-quoted-runtime-v1":
+        return
+    result = runner.run(
+        _ssh_command(
+            plan,
+            public_ip,
+            f"sha256sum {shlex.quote(plan.remote_run_root)}/source.patch",
+        ),
+        timeout=60,
+    )
+    values = result.stdout.split()
+    if not values or values[0] != plan.campaign_command[2]:
+        raise RuntimeError("remote source patch digest does not match the canary plan")
 
 
 def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
