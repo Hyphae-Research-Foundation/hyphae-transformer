@@ -588,7 +588,7 @@ def _validate_remote_source_patch(
         _ssh_command(
             plan,
             public_ip,
-            f"sha256sum {shlex.quote(plan.remote_run_root)}/source.patch",
+            f"git -C {shlex.quote(plan.remote_root)} diff --binary -- . | sha256sum",
         ),
         timeout=60,
     )
