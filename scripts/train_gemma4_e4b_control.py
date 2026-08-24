@@ -168,6 +168,9 @@ def run_campaign(
                 else float(training["pointer_policy_score"])
             ),
             pointer_policy_scale=float(training.get("pointer_policy_scale", 1.0)),
+            use_host_control_features=bool(
+                training.get("use_host_control_features", False)
+            ),
         ).to(device)
         config = ControlTrainConfig(
             epochs=epochs,

@@ -224,3 +224,19 @@ def test_pointer_policy_prior_separates_sufficient_evidence() -> None:
     assert (torch.sigmoid(logits.evidence_logits) >= 0.5).tolist() == [
         [True, True, False]
     ]
+
+
+def test_host_control_features_are_explicit_action_inputs() -> None:
+    head = GovernedControlHead(4, use_host_control_features=True)
+    with torch.no_grad():
+        head.action.weight.zero_()
+        head.action.bias.zero_()
+        head.action.weight[1, 6] = 10
+    logits = head(
+        torch.ones((1, 4)),
+        torch.ones((1, 1, 4)),
+        torch.ones((1, 1), dtype=torch.bool),
+        torch.tensor([[0.0]]),
+        torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0]]),
+    )
+    assert logits.action_logits.argmax(-1).item() == 1

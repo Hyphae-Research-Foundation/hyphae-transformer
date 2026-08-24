@@ -53,6 +53,7 @@ def evaluate_control_head(
         batch.evidence,
         batch.evidence_mask,
         batch.evidence_scores,
+        batch.host_control_features,
     )
     actions, pointers = decode_control(
         logits,

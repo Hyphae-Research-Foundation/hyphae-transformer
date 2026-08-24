@@ -24,9 +24,11 @@ class GovernedControlHead(nn.Module):
         use_evidence_scores: bool = False,
         pointer_policy_score: float | None = None,
         pointer_policy_scale: float = 1.0,
+        use_host_control_features: bool = False,
     ) -> None:
         super().__init__()
-        self.action = nn.Linear(hidden_size, 3)
+        self.use_host_control_features = use_host_control_features
+        self.action = nn.Linear(hidden_size + (5 if use_host_control_features else 0), 3)
         self.context = nn.Linear(hidden_size, pointer_rank, bias=False)
         self.evidence = nn.Linear(hidden_size, pointer_rank, bias=False)
         self.scale = pointer_rank**-0.5
@@ -41,12 +43,21 @@ class GovernedControlHead(nn.Module):
         evidence_features: torch.Tensor,
         evidence_mask: torch.Tensor,
         evidence_scores: torch.Tensor | None = None,
+        host_control_features: torch.Tensor | None = None,
     ) -> ControlLogits:
         if evidence_mask.dtype is not torch.bool:
             raise ValueError("evidence mask must be boolean")
         if self.normalized_features:
             context_features = nn.functional.normalize(context_features, dim=-1)
             evidence_features = nn.functional.normalize(evidence_features, dim=-1)
+        action_features = context_features
+        if self.use_host_control_features:
+            if host_control_features is None or host_control_features.shape != (
+                context_features.shape[0],
+                5,
+            ):
+                raise ValueError("host control features are required by this control head")
+            action_features = torch.cat((context_features, host_control_features), dim=-1)
         context = self.context(context_features).unsqueeze(1)
         evidence = self.evidence(evidence_features)
         pointers = (context * evidence).sum(-1) * self.scale
@@ -61,7 +72,7 @@ class GovernedControlHead(nn.Module):
                 evidence_scores - self.pointer_policy_score
             )
         pointers = pointers.masked_fill(~evidence_mask, -torch.inf)
-        return ControlLogits(self.action(context_features), pointers)
+        return ControlLogits(self.action(action_features), pointers)
 
 
 def decode_control(
