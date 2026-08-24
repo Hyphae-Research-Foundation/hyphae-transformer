@@ -303,6 +303,22 @@ def test_gemma_v2_training_plan_is_strict(tmp_path: Path) -> None:
     assert "--minimum-confidence 0.5" in campaign
 
 
+def test_gemma_v3_training_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_v3_training_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "train_gemma4_e4b_control.py" in command[-1]
+    )
+    assert "gemma4_e4b_governed_control_v3.json" in campaign
+    assert "--epochs 200" in campaign
+
+
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
     values = {
         field: getattr(plan(tmp_path), field)
@@ -426,3 +442,18 @@ def gemma_v2_training_plan(tmp_path: Path) -> CloudCampaignPlan:
         max_cost_usd=36,
         accelerator="amd-rocm",
     )
+
+
+def gemma_v3_training_plan(tmp_path: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(gemma_v2_training_plan(tmp_path), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-e4b-control-train-v3-x1",
+        campaign_command=(
+            "train-gemma4-e4b-v3",
+            *values["campaign_command"][1:],
+        ),
+    )
+    return CloudCampaignPlan(**values)

@@ -86,6 +86,7 @@ def run_campaign(
     if preregistration.get("schema") not in {
         EXPECTED_PREREGISTRATION_SCHEMA,
         "hyphae-transformer.gemma4-e4b-governed-control-preregistration/v2",
+        "hyphae-transformer.gemma4-e4b-governed-control-preregistration/v3",
     }:
         raise ValueError("Gemma preregistration schema is invalid")
     training = preregistration["training"]
@@ -161,6 +162,12 @@ def run_campaign(
             pointer_rank=int(training.get("pointer_rank", 32)),
             normalized_features=bool(training.get("normalized_features", False)),
             use_evidence_scores=bool(training.get("use_evidence_scores", False)),
+            pointer_policy_score=(
+                None
+                if training.get("pointer_policy_score") is None
+                else float(training["pointer_policy_score"])
+            ),
+            pointer_policy_scale=float(training.get("pointer_policy_scale", 1.0)),
         ).to(device)
         config = ControlTrainConfig(
             epochs=epochs,
