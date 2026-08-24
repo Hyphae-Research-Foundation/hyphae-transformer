@@ -614,7 +614,6 @@ def _write_retrieved_evidence(
                 completed = (
                     isinstance(value, dict)
                     and value.get("completed") is True
-                    and value.get("passed") is True
                 )
         else:
             value = json.loads(payload)

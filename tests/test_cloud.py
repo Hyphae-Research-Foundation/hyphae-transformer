@@ -345,6 +345,40 @@ def test_gemma_shadow_plan_is_strict(tmp_path: Path) -> None:
     assert (cloud_plan.artifact_directory / "shadow-report.json").is_file()
 
 
+def test_gemma_shadow_retrieval_preserves_completed_failed_gates(
+    tmp_path: Path,
+) -> None:
+    class FailedShadowRunner(FakeRunner):
+        def run(self, command, **kwargs):
+            if command[0] == "ssh" and command[-1].startswith("tar -C "):
+                import io
+                import tarfile
+
+                report = json.dumps({"completed": True, "passed": False}).encode()
+                archive_bytes = io.BytesIO()
+                with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
+                    item = tarfile.TarInfo("shadow-report.json")
+                    item.size = len(report)
+                    archive.addfile(item, io.BytesIO(report))
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    base64.b64encode(archive_bytes.getvalue()).decode(),
+                    "",
+                )
+            return super().run(command, **kwargs)
+
+    cloud_plan = gemma_shadow_plan(tmp_path)
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=FailedShadowRunner(), sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    report = json.loads(
+        (cloud_plan.artifact_directory / "shadow-report.json").read_text()
+    )
+    assert report["passed"] is False
+
+
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
     values = {
         field: getattr(plan(tmp_path), field)
