@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import time
 from dataclasses import dataclass
+from math import isfinite
 from typing import Protocol
 
-from celiums_rezero.knowledge.finalization import FinalAnswer
+from celiums_rezero.knowledge.coordinator import normalize_query
+from celiums_rezero.knowledge.finalization import FinalAnswer, FinalizationTimeout
+from celiums_rezero.knowledge.retrieval import GenerationRoutedRetriever
 from celiums_rezero.knowledge.schemas import (
     AcquisitionJob,
     EvidenceBundle,
     EvidenceHit,
+    JobStatus,
     SufficiencyPolicy,
 )
 
@@ -53,7 +59,48 @@ class FrozenGemmaRuntime(Protocol):
 
 
 class EvidenceProvider(Protocol):
-    def retrieve_for_job(self, job: AcquisitionJob) -> EvidenceBundle: ...
+    def retrieve_for_job(
+        self, job: AcquisitionJob, *, timeout_seconds: float
+    ) -> EvidenceBundle: ...
+
+
+class GenerationRoutedEvidenceProvider:
+    """Binds finalization retrieval to one durable answering job."""
+
+    def __init__(self, *, retriever: GenerationRoutedRetriever) -> None:
+        self.retriever = retriever
+
+    def retrieve_for_job(
+        self, job: AcquisitionJob, *, timeout_seconds: float
+    ) -> EvidenceBundle:
+        if job.status is not JobStatus.ANSWERING:
+            raise ValueError("routed evidence requires an answering job")
+        if job.tenant != self.retriever.tenant:
+            raise PermissionError("routed evidence provider belongs to another tenant")
+        normalized = normalize_query(job.query)
+        if normalized != job.query or hashlib.sha256(normalized.encode()).hexdigest() != (
+            job.query_digest
+        ):
+            raise ValueError("durable job query binding is invalid")
+        try:
+            bundle = self.retriever.retrieve(
+                job.tenant,
+                normalized,
+                timeout_seconds=timeout_seconds,
+            )
+        except TimeoutError as error:
+            raise FinalizationTimeout("routed evidence retrieval timed out") from error
+        except Exception as error:
+            if getattr(error, "code", None) == "deadline_exceeded":
+                raise FinalizationTimeout("routed evidence retrieval timed out") from error
+            raise
+        if (
+            bundle.tenant != job.tenant
+            or bundle.query_digest != job.query_digest
+            or bundle.corpus_generation != job.corpus_generation
+        ):
+            raise PermissionError("routed evidence does not match the finalization job")
+        return bundle
 
 
 class HostGemmaAnswerer:
@@ -77,7 +124,13 @@ class HostGemmaAnswerer:
     def answer(
         self, job: AcquisitionJob, *, timeout_seconds: float
     ) -> FinalAnswer | None:
-        bundle = self.evidence.retrieve_for_job(job)
+        if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("answer timeout must be finite and positive")
+        deadline = time.monotonic() + timeout_seconds
+        bundle = self.evidence.retrieve_for_job(
+            job,
+            timeout_seconds=_remaining_seconds(deadline),
+        )
         if (
             bundle.tenant != job.tenant
             or bundle.query_digest != job.query_digest
@@ -103,7 +156,7 @@ class HostGemmaAnswerer:
             raise ValueError("frozen model identity drifted before inference")
         result = self.runtime.infer(
             GovernedModelRequest(job.query, job.corpus_generation, tuple(passages)),
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=_remaining_seconds(deadline),
         )
         if result.identity != identity or result.decision not in {"answer", "insufficient"}:
             raise ValueError("frozen model identity or decision is invalid")
@@ -126,3 +179,10 @@ class HostGemmaAnswerer:
         if len(answer.encode()) > 16_384:
             raise ValueError("governed model answer exceeds its byte bound")
         return FinalAnswer(answer, tuple(handles))
+
+
+def _remaining_seconds(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise FinalizationTimeout("answer deadline exceeded")
+    return remaining

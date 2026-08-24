@@ -17,6 +17,7 @@ from typing import Protocol
 
 CLEANUP_RESERVE_SECONDS = 300
 ROCM_PYTORCH_IMAGE = "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1"
+BUNDLE_SHA256 = "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
 
 
 class CommandRunner(Protocol):
@@ -97,6 +98,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-v3",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
+            "canary-gemma4-e4b-quoted-runtime-v1",
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
@@ -110,6 +112,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-v3",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
+                "canary-gemma4-e4b-quoted-runtime-v1",
             }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
@@ -136,6 +139,8 @@ class CloudCampaignPlan:
             _validate_gemma_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v2":
             _validate_gemma_shadow_v2_command(self.campaign_command)
+        if self.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
+            _validate_gemma_quoted_runtime_command(self.campaign_command)
         for value in (
             self.remote_root,
             self.remote_data_root,
@@ -183,6 +188,8 @@ def execute_digitalocean_campaign(
             dry_run_commands=tuple(tuple(command) for command in commands),
         )
 
+    if plan.artifact_directory.exists() and any(plan.artifact_directory.iterdir()):
+        raise FileExistsError("cloud artifact directory is not empty")
     droplet_id: int | None = None
     public_ip: str | None = None
     created_at: datetime | None = None
@@ -215,19 +222,27 @@ def execute_digitalocean_campaign(
             ),
             sleep=sleep,
         )
-        bootstrap = command_runner.run(
-            _ssh_command(plan, public_ip, _bootstrap_script(plan)),
-            timeout=_remaining_lifetime(
-                plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
-            ),
-        )
+        try:
+            bootstrap = command_runner.run(
+                _ssh_command(plan, public_ip, _bootstrap_script(plan)),
+                timeout=_remaining_lifetime(
+                    plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+                ),
+            )
+        except subprocess.CalledProcessError as error:
+            _write_failed_process_evidence(plan, "bootstrap", error)
+            raise
         _write_process_evidence(plan, "bootstrap", bootstrap)
-        campaign = command_runner.run(
-            _ssh_command(plan, public_ip, _campaign_script(plan)),
-            timeout=_remaining_lifetime(
-                plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
-            ),
-        )
+        try:
+            campaign = command_runner.run(
+                _ssh_command(plan, public_ip, _campaign_script(plan)),
+                timeout=_remaining_lifetime(
+                    plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+                ),
+            )
+        except subprocess.CalledProcessError as error:
+            _write_failed_process_evidence(plan, "campaign", error)
+            raise
         _write_process_evidence(plan, "campaign", campaign)
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
         retrieval = command_runner.run(
@@ -306,6 +321,7 @@ def execute_digitalocean_campaign(
 
 
 def planned_commands(plan: CloudCampaignPlan) -> list[list[str]]:
+    placeholder = "<PUBLIC_IP>"
     return [
         [
             "doctl",
@@ -327,7 +343,11 @@ def planned_commands(plan: CloudCampaignPlan) -> list[list[str]]:
             "--wait",
             "--output",
             "json",
-        ]
+        ],
+        _ssh_command(plan, placeholder, _bootstrap_script(plan)),
+        _ssh_command(plan, placeholder, _campaign_script(plan)),
+        _artifact_command(plan, placeholder),
+        ["doctl", "compute", "droplet", "delete", "<DROPLET_ID>", "--force"],
     ]
 
 
@@ -421,6 +441,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-v3",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
+        "canary-gemma4-e4b-quoted-runtime-v1",
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
@@ -455,7 +476,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/runs",
                 *plan.campaign_command[1:],
             ]
-        else:
+        elif plan.campaign_command[0].startswith("shadow-gemma4-e4b"):
             shadow_version = plan.campaign_command[0].rsplit("-", 1)[-1]
             command = [
                 "python",
@@ -474,6 +495,25 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "--out",
                 "/runs",
                 *plan.campaign_command[1:],
+            ]
+        else:
+            command = [
+                "python",
+                "/workspace/scripts/canary_gemma4_e4b_quoted_runtime.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--bundle",
+                "/data/gemma4-e4b-control-v3-seed17.tar.gz",
+                "--source-revision",
+                plan.revision,
+                "--source-patch-sha256",
+                plan.campaign_command[2],
+                "--out",
+                "/runs",
+                "--runtime-timeout-seconds",
+                "180",
+                "--bundle-sha256",
+                BUNDLE_SHA256,
             ]
         inner = (
             f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}"
@@ -515,6 +555,8 @@ def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
                 f"tar -C {plan.remote_run_root} -czf - "
                 "shadow-report.json shadow-audit.jsonl | base64 -w0"
             )
+        elif plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
+            artifact = f"tar -C {plan.remote_run_root} -czf - . | base64 -w0"
         else:
             artifact = f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-smoke.json"
         return _ssh_command(
@@ -542,6 +584,8 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
         if plan.campaign_command[0].startswith("train-gemma4-e4b")
         else "gemma4-e4b-shadow.tar.gz"
         if plan.campaign_command[0].startswith("shadow-gemma4-e4b")
+        else "gemma4-e4b-quoted-runtime-canary.tar.gz"
+        if plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1"
         else "gemma4-e4b-smoke.json"
     )
 
@@ -587,14 +631,17 @@ def _rocm_bootstrap_inner() -> str:
                 "releases/download/governed-control-v3.0.0/"
                 "gemma4-e4b-control-v3-seed17.tar.gz"
             ),
+            f"echo '{BUNDLE_SHA256}  /data/gemma4-e4b-control-v3-seed17.tar.gz' | sha256sum -c -",
             (
                 "PYTHONPATH=/python python /workspace/scripts/download_gemma4_e4b.py "
                 "--out /data/gemma4-e4b"
             ),
             (
                 "PYTHONPATH=/python python /workspace/scripts/preflight_gemma4_e4b.py "
-                "--model /data/gemma4-e4b --require-gpu"
+                "--model /data/gemma4-e4b --require-gpu | tee /runs/gemma4-e4b-preflight.json"
             ),
+            "git -C /workspace rev-parse HEAD > /runs/source-revision.txt",
+            "python -m pip freeze > /runs/python-freeze.txt",
         )
     )
 
@@ -624,6 +671,19 @@ def _write_retrieved_evidence(
                     isinstance(value, dict)
                     and value.get("completed") is True
                 )
+        elif plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
+            with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
+                member = archive.getmember("./quoted-runtime-canary-report.json")
+                source = archive.extractfile(member)
+                if source is None or not member.isfile():
+                    raise ValueError("quoted runtime report is absent")
+                value = json.loads(source.read())
+                completed = (
+                    isinstance(value, dict)
+                    and value.get("completed") is True
+                    and value.get("passed") is True
+                    and value.get("request_count") == 1
+                )
         else:
             value = json.loads(payload)
             completed = isinstance(value, dict) and value.get("passed") is True
@@ -640,6 +700,11 @@ def _write_retrieved_evidence(
         (plan.artifact_directory / "shadow-report.json").write_text(
             json.dumps(value, indent=2, sort_keys=True) + "\n"
         )
+    elif plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
+        with tarfile.open(
+            fileobj=BytesIO(payload), mode="r:gz"
+        ) as archive:
+            archive.extractall(plan.artifact_directory, filter="data")
 
 
 def _write_process_evidence(
@@ -650,6 +715,18 @@ def _write_process_evidence(
     plan.artifact_directory.mkdir(parents=True, exist_ok=True)
     (plan.artifact_directory / f"{stage}.stdout.log").write_text(process.stdout)
     (plan.artifact_directory / f"{stage}.stderr.log").write_text(process.stderr)
+
+
+def _write_failed_process_evidence(
+    plan: CloudCampaignPlan,
+    stage: str,
+    error: subprocess.CalledProcessError,
+) -> None:
+    plan.artifact_directory.mkdir(parents=True, exist_ok=True)
+    stdout = error.stdout if isinstance(error.stdout, str) else ""
+    stderr = error.stderr if isinstance(error.stderr, str) else ""
+    (plan.artifact_directory / f"{stage}.stdout.log").write_text(stdout)
+    (plan.artifact_directory / f"{stage}.stderr.log").write_text(stderr)
 
 
 def _public_ipv4(droplet: object) -> str:
@@ -808,6 +885,16 @@ def _validate_gemma_shadow_v2_command(command: tuple[str, ...]) -> None:
         "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
     ):
         raise ValueError("Gemma E4B shadow v2 command differs from preregistration")
+
+
+def _validate_gemma_quoted_runtime_command(command: tuple[str, ...]) -> None:
+    if (
+        len(command) != 3
+        or command[0] != "canary-gemma4-e4b-quoted-runtime-v1"
+        or command[1] != "--source-patch-sha256"
+        or not re.fullmatch(r"[0-9a-f]{64}", command[2])
+    ):
+        raise ValueError("Gemma E4B quoted runtime command differs from preregistration")
 
 
 def _remaining_lifetime(

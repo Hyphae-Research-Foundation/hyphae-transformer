@@ -255,6 +255,7 @@ PYTHONPATH=/path/to/hyphae/sdks/python/src:src \
   --endpoint /tmp/tenant-a/hyphae.sock \
   --api-key-file /tmp/tenant-a/owner.key \
   --collection 13 --receipts /tmp/tenant-a/receipts \
+  --routing-database /tmp/tenant-a/routing.sqlite3 \
   --backend-id <sha256-of-persistent-hyphae-directory-lineage> \
   --expected-sdk-version 2.1.0 --expected-runtime-version 2.1.0 \
   --score-scale 0.03278688524590164
@@ -278,6 +279,26 @@ The certified single-document weighted-RRF maximum is `2 / 61 =
 0.03278688524590164`; production `RetrievalConfig` instances targeting the same
 one-lexical/one-vector weight-1 fusion must pin that scale. A different branch count,
 branch weight, fusion method, or Hyphae release requires a new score calibration gate.
+Production generation routing must receive the root-owned
+`HYPHAE_210_RETRIEVAL_PROFILE`; `GenerationRoutedRetriever` has no implicit score
+profile and validates the exact vector receipt before accepting routed evidence.
+The isolated conformance path also verifies the generation manifest from durable live
+receipts, activates it, retrieves through the active route under a Hyphae deadline,
+produces a deterministic verbatim canary quote, stages one immutable notification, and
+reaches `completed`. The quote runtime and process-local sink are canary fixtures, not
+production Gemma or provider qualification.
+Production finalization can use `SupervisedFrozenGemmaRuntime` to exchange one bounded
+canonical request with a digest-pinned executable over stdin/stdout. The host enforces
+one wall-clock deadline, process-group termination, frozen identity, exact response
+schema, supplied handles, and verbatim quotations. The shipped governed runtime loads
+the exact Gemma artifact manifest and published control bundle; the control head may
+only select evidence or abstain.
+
+`SQLiteMailboxNotificationSink` provides a separate durable acceptance boundary keyed
+by `notification_id`. Replay after process restart returns the original receipt and a
+different command under the same identity fails permanently. This proves exactly-once
+acceptance into the local mailbox, not exactly-once observation by an external webhook,
+email, or messaging provider.
 
 ## Production Runtime Boundary
 

@@ -27,14 +27,29 @@ from celiums_rezero.knowledge.live import (
     HttpsSourceConnector,
     HyphaeShadowIngestor,
 )
+from celiums_rezero.knowledge.model_runtime import (
+    FrozenRuntimeExchange,
+    SupervisedFrozenGemmaRuntime,
+    SupervisedFrozenRuntimeConfig,
+)
+from celiums_rezero.knowledge.notifications import (
+    HttpsNotificationConfig,
+    HttpsNotificationSink,
+    SQLiteMailboxConfig,
+    SQLiteMailboxNotificationSink,
+)
+from celiums_rezero.knowledge.orchestration import GenerationRoutedEvidenceProvider
 from celiums_rezero.knowledge.publication import (
     DurablePublicationAuthorizer,
     PublicationReceiptStore,
 )
 from celiums_rezero.knowledge.retrieval import (
+    HYPHAE_210_RETRIEVAL_PROFILE,
+    GenerationRoutedRetriever,
     HyphaeRetrievalGateway,
     RetrievalConfig,
     RetrievalContractError,
+    RetrievalProfile,
 )
 from celiums_rezero.knowledge.schemas import (
     AcquisitionJob,
@@ -56,6 +71,7 @@ from celiums_rezero.knowledge.validation import (
 )
 
 __all__ = [
+    "HYPHAE_210_RETRIEVAL_PROFILE",
     "AcquisitionJob",
     "AcquisitionOutcome",
     "AcquisitionPolicy",
@@ -73,8 +89,13 @@ __all__ = [
     "FinalAnswer",
     "FinalizationPolicy",
     "FinalizationTimeout",
+    "FrozenRuntimeExchange",
     "GenerationAuthority",
+    "GenerationRoutedEvidenceProvider",
+    "GenerationRoutedRetriever",
     "HttpsFetchPolicy",
+    "HttpsNotificationConfig",
+    "HttpsNotificationSink",
     "HttpsSourceConnector",
     "HyphaeRetrievalGateway",
     "HyphaeShadowIngestor",
@@ -89,11 +110,16 @@ __all__ = [
     "PublicationReceiptStore",
     "RetrievalConfig",
     "RetrievalContractError",
+    "RetrievalProfile",
+    "SQLiteMailboxConfig",
+    "SQLiteMailboxNotificationSink",
     "SQLiteTenantStore",
     "SecurityRejection",
     "StrictArtifactValidator",
     "SufficiencyDecision",
     "SufficiencyPolicy",
+    "SupervisedFrozenGemmaRuntime",
+    "SupervisedFrozenRuntimeConfig",
     "TenantId",
     "TransientFinalizationError",
     "check_notification_sink",

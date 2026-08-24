@@ -104,6 +104,8 @@ def certify(
                     str(COLLECTION),
                     "--receipts",
                     str(receipts),
+                    "--routing-database",
+                    str(work_root / "routing.sqlite3"),
                     "--backend-id",
                     backend_id,
                     "--expected-sdk-version",
@@ -266,14 +268,18 @@ def _stop(process: subprocess.Popen[str], endpoint: Path) -> None:
 
 
 def _run(command: list[str], *, cwd: Path | None = None) -> str:
-    return subprocess.run(
+    result = subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
-        check=True,
         text=True,
         env={**os.environ},
-    ).stdout.strip()
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"command failed ({result.returncode}): {' '.join(command)}\n{result.stderr.strip()}"
+        )
+    return result.stdout.strip()
 
 
 def _run_json(command: list[str]) -> dict[str, object]:
