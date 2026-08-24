@@ -57,7 +57,12 @@ def main() -> int:
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             device=device,
         )
-        logits = head(batch.context, batch.evidence, batch.evidence_mask)
+        logits = head(
+            batch.context,
+            batch.evidence,
+            batch.evidence_mask,
+            batch.evidence_scores,
+        )
         action_loss = nn.functional.cross_entropy(logits.action_logits, batch.action_targets)
         finite_pointers = logits.evidence_logits.masked_fill(~batch.evidence_mask, 0)
         pointer_loss = (

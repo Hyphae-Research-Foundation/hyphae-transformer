@@ -1,0 +1,63 @@
+{
+  "backbone": {
+    "feature_contract": "gemma4-e4b-it-layer41-final-valid-token-f32-v1",
+    "model_id": "google/gemma-4-E4B-it",
+    "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "model_safetensors_bytes": 15992595884,
+    "model_safetensors_sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503",
+    "transformers": "5.14.1"
+  },
+  "claim": "A normalized governed action and evidence-score-aware pointer head over frozen Gemma 4 E4B satisfies all held-out and adversarial gates under a stable SGD recipe.",
+  "dataset": {
+    "governed_dataset_id": "gtd_b7161eb4c1cf007dca96741ad8acffbe25cd9b6b46681fd48f19f21fde29332f",
+    "manifest_sha256": "2e3f45d3a210ab17dbe078fadd9e0a6feda8fda88324f5f958f9488e7627115e"
+  },
+  "falsification": [
+    "Any base-model parameter or buffer changes.",
+    "Any seed misses any held-out or adversarial gate.",
+    "Final loss is non-finite or exceeds initial loss.",
+    "Any unsafe answer is emitted.",
+    "Peak VRAM exceeds 240 GiB."
+  ],
+  "gates": {
+    "abstention_recall": 1.0,
+    "action_accuracy": 0.9,
+    "answer_recall": 0.8,
+    "evidence_exact_match": 0.9,
+    "unsafe_answer_rate": 0.0
+  },
+  "prior_result": {
+    "archive_sha256": "b85ef0943b03fb19477d442870e04e8d267eae0738b36b44cc48156d5f980b87",
+    "outcome": "falsified",
+    "report_sha256": "7d3eae1afcf4717a4a43b7f61cf65aea7e4907f1334933f740d413c60d0e7f7d",
+    "root_causes": [
+      "AdamW learning rate 0.001 caused final loss divergence for all seeds.",
+      "The unnormalized pointer head selected all evidence for single-target answer records, fixing exact match near the 20/44 multi-target share."
+    ]
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-governed-control-preregistration/v2",
+  "scope": "Frozen-backbone v2 control-head training only; v1 evidence remains immutable and failed.",
+  "structural_gates": {
+    "backbone_unchanged": true,
+    "final_loss_not_greater_than_initial": true,
+    "maximum_peak_vram_gib": 240
+  },
+  "training": {
+    "batch_size_smoke": [1, 2, 4, 8],
+    "device": "cuda",
+    "epochs": 200,
+    "evidence_loss_weight": 2.0,
+    "gradient_clip": 1.0,
+    "head_learning_rate": 0.05,
+    "maximum_evidence_items": 8,
+    "minimum_confidence": 0.5,
+    "normalized_features": true,
+    "optimizer": "sgd",
+    "pointer_loss_scope": "answer",
+    "pointer_rank": 32,
+    "pointer_threshold": 0.5,
+    "seeds": [17, 29, 43],
+    "use_evidence_scores": true,
+    "weight_decay": 0.0
+  }
+}

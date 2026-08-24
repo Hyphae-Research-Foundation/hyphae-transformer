@@ -93,12 +93,14 @@ class CloudCampaignPlan:
             "pilot-enwiki8",
             "smoke-gemma4-e4b",
             "train-gemma4-e4b",
+            "train-gemma4-e4b-v2",
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
             raise ValueError("cloud accelerator is not allowlisted")
         gemma_workload = self.data_command[0] == "prepare-gemma4-e4b" or (
-            self.campaign_command[0] in {"smoke-gemma4-e4b", "train-gemma4-e4b"}
+            self.campaign_command[0]
+            in {"smoke-gemma4-e4b", "train-gemma4-e4b", "train-gemma4-e4b-v2"}
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
             raise ValueError("Gemma E4B workload requires the AMD ROCm executor")
@@ -116,6 +118,8 @@ class CloudCampaignPlan:
             _validate_gemma_smoke_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b":
             _validate_gemma_training_command(self.campaign_command)
+        if self.campaign_command[0] == "train-gemma4-e4b-v2":
+            _validate_gemma_v2_training_command(self.campaign_command)
         for value in (
             self.remote_root,
             self.remote_data_root,
@@ -394,7 +398,11 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
 
 
 def _campaign_script(plan: CloudCampaignPlan) -> str:
-    if plan.campaign_command[0] in {"smoke-gemma4-e4b", "train-gemma4-e4b"}:
+    if plan.campaign_command[0] in {
+        "smoke-gemma4-e4b",
+        "train-gemma4-e4b",
+        "train-gemma4-e4b-v2",
+    }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
             command = [
@@ -409,6 +417,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 *plan.campaign_command[1:],
             ]
         else:
+            version = "v2" if plan.campaign_command[0].endswith("-v2") else "v1"
             command = [
                 "python",
                 "/workspace/scripts/train_gemma4_e4b_control.py",
@@ -417,7 +426,10 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "--dataset",
                 "/workspace/experiments/governed/mars-v2-e4b-v1",
                 "--preregistration",
-                "/workspace/experiments/canonical/gemma4_e4b_governed_control_v1.json",
+                (
+                    "/workspace/experiments/canonical/"
+                    f"gemma4_e4b_governed_control_{version}.json"
+                ),
                 "--out",
                 "/runs",
                 *plan.campaign_command[1:],
@@ -455,7 +467,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
 
 def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
     if plan.accelerator == "amd-rocm":
-        if plan.campaign_command[0] == "train-gemma4-e4b":
+        if plan.campaign_command[0].startswith("train-gemma4-e4b"):
             artifact = f"tar -C {plan.remote_run_root} -czf - . | base64 -w0"
         else:
             artifact = f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-smoke.json"
@@ -481,7 +493,7 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
         raise ValueError("only AMD campaigns declare one exact evidence artifact")
     return (
         "gemma4-e4b-training.tar.gz"
-        if plan.campaign_command[0] == "train-gemma4-e4b"
+        if plan.campaign_command[0].startswith("train-gemma4-e4b")
         else "gemma4-e4b-smoke.json"
     )
 
@@ -539,7 +551,7 @@ def _write_retrieved_evidence(
     try:
         payload = base64.b64decode(process.stdout, validate=True)
         completed = True
-        if plan.campaign_command[0] == "train-gemma4-e4b":
+        if plan.campaign_command[0].startswith("train-gemma4-e4b"):
             with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
                 member = archive.getmember("./training-report.json")
                 source = archive.extractfile(member)
@@ -555,7 +567,7 @@ def _write_retrieved_evidence(
     if not completed:
         raise RuntimeError("retrieved cloud campaign evidence did not complete")
     (plan.artifact_directory / _expected_artifact_name(plan)).write_bytes(payload)
-    if plan.campaign_command[0] == "train-gemma4-e4b":
+    if plan.campaign_command[0].startswith("train-gemma4-e4b"):
         (plan.artifact_directory / "training-report.json").write_text(
             json.dumps(value, indent=2, sort_keys=True) + "\n"
         )
@@ -659,6 +671,31 @@ def _validate_gemma_training_command(command: tuple[str, ...]) -> None:
         "8",
     ):
         raise ValueError("Gemma E4B training command differs from preregistration")
+
+
+def _validate_gemma_v2_training_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "train-gemma4-e4b-v2",
+        "--seeds",
+        "17",
+        "29",
+        "43",
+        "--epochs",
+        "200",
+        "--learning-rate",
+        "0.05",
+        "--evidence-loss-weight",
+        "2.0",
+        "--gradient-clip",
+        "1.0",
+        "--feature-batch-size",
+        "8",
+        "--pointer-threshold",
+        "0.5",
+        "--minimum-confidence",
+        "0.5",
+    ):
+        raise ValueError("Gemma E4B v2 training command differs from preregistration")
 
 
 def _remaining_lifetime(

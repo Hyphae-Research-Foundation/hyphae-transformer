@@ -76,6 +76,9 @@ def run_registered_governed(
             "evidence_loss_weight": config.evidence_loss_weight,
             "gradient_clip": config.gradient_clip,
             "device": config.device,
+            "optimizer": config.optimizer,
+            "weight_decay": config.weight_decay,
+            "pointer_loss_scope": config.pointer_loss_scope,
         } != prereg["training"]:
             raise ValueError("training configuration differs from preregistration")
         gates = prereg.get("gates")

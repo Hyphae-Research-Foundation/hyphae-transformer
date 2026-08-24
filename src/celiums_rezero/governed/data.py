@@ -26,6 +26,7 @@ from celiums_rezero.lab.serialization import canonical_json
 class GovernedBatch:
     context: torch.Tensor
     evidence: torch.Tensor
+    evidence_scores: torch.Tensor
     evidence_mask: torch.Tensor
     action_targets: torch.Tensor
     pointer_targets: torch.Tensor
@@ -157,6 +158,9 @@ def make_batch(
         (len(records), maximum_evidence_items, hidden), dtype=torch.float32, device=device
     )
     mask = torch.zeros((len(records), maximum_evidence_items), dtype=torch.bool, device=device)
+    scores = torch.zeros(
+        (len(records), maximum_evidence_items), dtype=torch.float32, device=device
+    )
     pointers = torch.zeros_like(mask, dtype=torch.float32)
     actions = torch.empty(len(records), dtype=torch.long, device=device)
     action_index = {action: index for index, action in enumerate(ControlAction)}
@@ -177,12 +181,15 @@ def make_batch(
                 raise ValueError("target evidence was removed by the item bound")
             encoded = flattened_features[offset : offset + len(ordered)]
             evidence[row, : len(ordered)] = encoded
+            scores[row, : len(ordered)] = torch.tensor(
+                [hit.score for hit in ordered], dtype=torch.float32, device=device
+            )
             mask[row, : len(ordered)] = True
             for column, hit in enumerate(ordered):
                 pointers[row, column] = float(hit.handle in selected)
             offset += len(ordered)
         actions[row] = action_index[record.target.action]
-    return GovernedBatch(context, evidence, mask, actions, pointers)
+    return GovernedBatch(context, evidence, scores, mask, actions, pointers)
 
 
 def materialize_governed_batch(
@@ -209,6 +216,7 @@ def materialize_governed_batch(
     return GovernedBatch(
         context=torch.cat(tuple(batch.context for batch in batches)),
         evidence=torch.cat(tuple(batch.evidence for batch in batches)),
+        evidence_scores=torch.cat(tuple(batch.evidence_scores for batch in batches)),
         evidence_mask=torch.cat(tuple(batch.evidence_mask for batch in batches)),
         action_targets=torch.cat(tuple(batch.action_targets for batch in batches)),
         pointer_targets=torch.cat(tuple(batch.pointer_targets for batch in batches)),
