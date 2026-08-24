@@ -18,6 +18,20 @@ from typing import Protocol
 CLEANUP_RESERVE_SECONDS = 300
 ROCM_PYTORCH_IMAGE = "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1"
 BUNDLE_SHA256 = "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
+HYPHAE_WHEEL_SHA256 = "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb"
+HYPHAE_WHEEL_BYTES = 87_754
+UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-v1"
+UNIFIED_EVIDENCE = (
+    "unified-campaign-report.json",
+    "minilm-preflight.json",
+    "gemma4-e4b-preflight.json",
+    "protocol-request.json",
+    "protocol-response.json",
+    "hyphae-daemon.stdout.log",
+    "hyphae-daemon.stderr.log",
+    "source-revision.txt",
+    "python-freeze.txt",
+)
 
 
 class CommandRunner(Protocol):
@@ -69,6 +83,7 @@ class CloudCampaignPlan:
     remote_root: str = "/opt/hyphae-transformer"
     remote_data_root: str = "/opt/celiums-data"
     remote_run_root: str = "/opt/celiums-runs/campaign"
+    hyphae_sdk_wheel: Path | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not self.region or not self.size or not self.image:
@@ -99,6 +114,7 @@ class CloudCampaignPlan:
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "canary-gemma4-e4b-quoted-runtime-v1",
+            UNIFIED_CAMPAIGN,
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
@@ -113,6 +129,7 @@ class CloudCampaignPlan:
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "canary-gemma4-e4b-quoted-runtime-v1",
+                UNIFIED_CAMPAIGN,
             }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
@@ -141,6 +158,11 @@ class CloudCampaignPlan:
             _validate_gemma_shadow_v2_command(self.campaign_command)
         if self.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
             _validate_gemma_quoted_runtime_command(self.campaign_command)
+        if self.campaign_command[0] == UNIFIED_CAMPAIGN and (
+            self.campaign_command != (UNIFIED_CAMPAIGN,)
+            or self.hyphae_sdk_wheel is None
+        ):
+            raise ValueError("unified campaign requires one exact Hyphae SDK wheel")
         for value in (
             self.remote_root,
             self.remote_data_root,
@@ -190,6 +212,8 @@ def execute_digitalocean_campaign(
 
     if plan.artifact_directory.exists() and any(plan.artifact_directory.iterdir()):
         raise FileExistsError("cloud artifact directory is not empty")
+    if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        _validate_hyphae_wheel(plan)
     droplet_id: int | None = None
     public_ip: str | None = None
     created_at: datetime | None = None
@@ -222,6 +246,17 @@ def execute_digitalocean_campaign(
             ),
             sleep=sleep,
         )
+        if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+            wheel_upload = command_runner.run(
+                _wheel_upload_command(plan, public_ip),
+                timeout=min(
+                    120,
+                    _remaining_lifetime(
+                        plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS
+                    ),
+                ),
+            )
+            _write_process_evidence(plan, "wheel-upload", wheel_upload)
         try:
             bootstrap = command_runner.run(
                 _ssh_command(plan, public_ip, _bootstrap_script(plan)),
@@ -323,7 +358,7 @@ def execute_digitalocean_campaign(
 
 def planned_commands(plan: CloudCampaignPlan) -> list[list[str]]:
     placeholder = "<PUBLIC_IP>"
-    return [
+    commands = [
         [
             "doctl",
             "compute",
@@ -345,10 +380,29 @@ def planned_commands(plan: CloudCampaignPlan) -> list[list[str]]:
             "--output",
             "json",
         ],
+    ]
+    if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        commands.append(_wheel_upload_command(plan, placeholder))
+    commands.extend([
         _ssh_command(plan, placeholder, _bootstrap_script(plan)),
         _ssh_command(plan, placeholder, _campaign_script(plan)),
         _artifact_command(plan, placeholder),
         ["doctl", "compute", "droplet", "delete", "<DROPLET_ID>", "--force"],
+    ])
+    return commands
+
+
+def _wheel_upload_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
+    if plan.hyphae_sdk_wheel is None:
+        raise ValueError("unified campaign has no Hyphae SDK wheel")
+    return [
+        "scp",
+        "-i",
+        str(plan.ssh_private_key),
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        str(plan.hyphae_sdk_wheel),
+        f"root@{public_ip}:/tmp/hyphae_sdk-2.1.0-py3-none-any.whl",
     ]
 
 
@@ -405,13 +459,22 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
         f"mkdir -p {shlex.quote(plan.remote_data_root)} {shlex.quote(plan.remote_run_root)}",
     )
     if plan.accelerator == "amd-rocm":
+        unified: tuple[str, ...] = ()
+        if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+            unified = (
+                (
+                    "mv /tmp/hyphae_sdk-2.1.0-py3-none-any.whl "
+                    f"{shlex.quote(plan.remote_data_root)}/hyphae_sdk-2.1.0-py3-none-any.whl"
+                ),
+            )
         container = _rocm_container_command(plan)
         return " && ".join(
             (
                 *common,
+                *unified,
                 "rocm-smi --showproductname --showmeminfo vram --showdriverversion",
                 f"docker pull {shlex.quote(ROCM_PYTORCH_IMAGE)}",
-                f"{container} /bin/bash -lc {shlex.quote(_rocm_bootstrap_inner())}",
+                f"{container} /bin/bash -lc {shlex.quote(_rocm_bootstrap_inner(plan))}",
             )
         )
     return " && ".join(
@@ -443,6 +506,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "canary-gemma4-e4b-quoted-runtime-v1",
+        UNIFIED_CAMPAIGN,
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
@@ -497,7 +561,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/runs",
                 *plan.campaign_command[1:],
             ]
-        else:
+        elif plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
             command = [
                 "python",
                 "/workspace/scripts/canary_gemma4_e4b_quoted_runtime.py",
@@ -516,6 +580,31 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "--bundle-sha256",
                 BUNDLE_SHA256,
             ]
+        else:
+            command = [
+                "python",
+                "/workspace/scripts/run_hyphae_minilm_gemma_canary.py",
+                "--hyphae-archive",
+                "/data/hyphae-2.1.0-x86_64-unknown-linux-gnu.tar.gz",
+                "--hyphae-binary",
+                "/data/hyphae-2.1.0",
+                "--hyphae-wheel",
+                "/data/hyphae_sdk-2.1.0-py3-none-any.whl",
+                "--minilm-model",
+                "/data/all-MiniLM-L6-v2",
+                "--gemma-model",
+                "/data/gemma4-e4b",
+                "--bundle",
+                "/data/gemma4-e4b-control-v3-seed17.tar.gz",
+                "--source-revision",
+                plan.revision,
+                "--source-patch-sha256",
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "--work-root",
+                "/tmp/hyphae-unified-v1",
+                "--out",
+                "/runs",
+            ]
         inner = (
             f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}"
         )
@@ -524,7 +613,8 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 (
                     "timeout --signal=TERM "
                     f"{campaign_seconds}s "
-                    f"{_rocm_container_command(plan)} /bin/bash -lc {shlex.quote(inner)}"
+                    f"{_rocm_container_command(plan, network_none=(plan.campaign_command[0] == UNIFIED_CAMPAIGN))} "  # noqa: E501
+                    f"/bin/bash -lc {shlex.quote(inner)}"
                 ),
             )
         )
@@ -558,6 +648,12 @@ def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
             )
         elif plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
             artifact = f"tar -C {plan.remote_run_root} -czf - . | base64 -w0"
+        elif plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+            members = " ".join(shlex.quote(value) for value in UNIFIED_EVIDENCE)
+            artifact = (
+                f"tar --ignore-failed-read -C {plan.remote_run_root} -czf - {members} "
+                "| base64 -w0"
+            )
         else:
             artifact = f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-smoke.json"
         return _ssh_command(
@@ -582,7 +678,10 @@ def _validate_remote_source_patch(
     public_ip: str,
     runner: CommandRunner,
 ) -> None:
-    if plan.campaign_command[0] != "canary-gemma4-e4b-quoted-runtime-v1":
+    if plan.campaign_command[0] not in {
+        "canary-gemma4-e4b-quoted-runtime-v1",
+        UNIFIED_CAMPAIGN,
+    }:
         return
     result = runner.run(
         _ssh_command(
@@ -593,7 +692,12 @@ def _validate_remote_source_patch(
         timeout=60,
     )
     values = result.stdout.split()
-    if not values or values[0] != plan.campaign_command[2]:
+    expected = (
+        plan.campaign_command[2]
+        if plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1"
+        else "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
+    if not values or values[0] != expected:
         raise RuntimeError("remote source patch digest does not match the canary plan")
 
 
@@ -607,16 +711,20 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
         if plan.campaign_command[0].startswith("shadow-gemma4-e4b")
         else "gemma4-e4b-quoted-runtime-canary.tar.gz"
         if plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1"
+        else "hyphae-minilm-gemma-evidence.tar.gz"
+        if plan.campaign_command[0] == UNIFIED_CAMPAIGN
         else "gemma4-e4b-smoke.json"
     )
 
 
-def _rocm_container_command(plan: CloudCampaignPlan) -> str:
-    return shlex.join(
-        [
+def _rocm_container_command(
+    plan: CloudCampaignPlan, *, network_none: bool = False
+) -> str:
+    command = [
             "docker",
             "run",
             "--rm",
+            "--init",
             "--device=/dev/kfd",
             "--device=/dev/dri",
             "--group-add",
@@ -634,12 +742,13 @@ def _rocm_container_command(plan: CloudCampaignPlan) -> str:
             f"{plan.remote_data_root}/python:/python",
             ROCM_PYTORCH_IMAGE,
         ]
-    )
+    if network_none:
+        command.insert(4, "--network=none")
+    return shlex.join(command)
 
 
-def _rocm_bootstrap_inner() -> str:
-    return " && ".join(
-        (
+def _rocm_bootstrap_inner(plan: CloudCampaignPlan) -> str:
+    commands = [
             (
                 "PYTHONPATH=/python python -c \"import torch; assert torch.version.hip; "
                 "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
@@ -662,9 +771,45 @@ def _rocm_bootstrap_inner() -> str:
                 "--model /data/gemma4-e4b --require-gpu | tee /runs/gemma4-e4b-preflight.json"
             ),
             "git -C /workspace rev-parse HEAD > /runs/source-revision.txt",
-            "python -m pip freeze > /runs/python-freeze.txt",
+            "PYTHONPATH=/python python -m pip freeze > /runs/python-freeze.txt",
+        ]
+    if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        commands.extend(
+            [
+                (
+                    "echo 'fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb  "
+                    "/data/hyphae_sdk-2.1.0-py3-none-any.whl' | sha256sum -c -"
+                ),
+                (
+                    "python -m pip install --no-deps --target /python "
+                    "/data/hyphae_sdk-2.1.0-py3-none-any.whl"
+                ),
+                (
+                    "curl -LsSf -o /data/hyphae-2.1.0-x86_64-unknown-linux-gnu.tar.gz "
+                    "https://github.com/Hyphae-Research-Foundation/hyphae/releases/download/"
+                    "v2.1.0/hyphae-2.1.0-x86_64-unknown-linux-gnu.tar.gz"
+                ),
+                (
+                    "echo 'a1e8cf56d9b9a96ee5f230aa4dec92b2541792f7ca4bb40c0dbf761d9ed3e0aa  "
+                    "/data/hyphae-2.1.0-x86_64-unknown-linux-gnu.tar.gz' | sha256sum -c -"
+                ),
+                (
+                    "tar -xOf /data/hyphae-2.1.0-x86_64-unknown-linux-gnu.tar.gz "
+                    "hyphae-2.1.0-x86_64-unknown-linux-gnu/hyphae > /data/hyphae-2.1.0"
+                ),
+                "chmod 0500 /data/hyphae-2.1.0",
+                (
+                    "echo 'a00ea0cfc502ad63d65c42357664f7664f8a8c482fbdeb24a4f5511feceb45d0  "
+                    "/data/hyphae-2.1.0' | sha256sum -c -"
+                ),
+                (
+                    "PYTHONPATH=/workspace/src:/python python "
+                    "/workspace/scripts/download_minilm_l6_v2.py "
+                    "--out /data/all-MiniLM-L6-v2 | tee /runs/minilm-preflight.json"
+                ),
+            ]
         )
-    )
+    return " && ".join(commands)
 
 
 def _write_retrieved_evidence(
@@ -705,6 +850,9 @@ def _write_retrieved_evidence(
                     and value.get("passed") is True
                     and value.get("request_count") == 1
                 )
+        elif plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+            value, members = _read_unified_evidence(payload)
+            completed = _valid_unified_report(value, plan)
         else:
             value = json.loads(payload)
             completed = isinstance(value, dict) and value.get("passed") is True
@@ -726,6 +874,95 @@ def _write_retrieved_evidence(
             fileobj=BytesIO(payload), mode="r:gz"
         ) as archive:
             archive.extractall(plan.artifact_directory, filter="data")
+    elif plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        for name, content in members.items():
+            (plan.artifact_directory / name).write_bytes(content)
+
+
+def _read_unified_evidence(
+    payload: bytes,
+) -> tuple[dict[str, object], dict[str, bytes]]:
+    if len(payload) > 8_000_000:
+        raise ValueError("unified evidence archive is oversized")
+    members: dict[str, bytes] = {}
+    with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
+        for member in archive.getmembers():
+            name = member.name.removeprefix("./")
+            if (
+                name not in UNIFIED_EVIDENCE
+                or name in members
+                or not member.isfile()
+                or member.size > 1_000_000
+            ):
+                raise ValueError("unified evidence archive member is invalid")
+            source = archive.extractfile(member)
+            if source is None:
+                raise ValueError("unified evidence archive member is unreadable")
+            content = source.read(1_000_001)
+            if len(content) != member.size:
+                raise ValueError("unified evidence archive member size differs")
+            members[name] = content
+    if set(members) != set(UNIFIED_EVIDENCE):
+        raise ValueError("unified evidence archive is incomplete")
+    value = json.loads(members["unified-campaign-report.json"])
+    if not isinstance(value, dict):
+        raise ValueError("unified report is not an object")
+    return value, members
+
+
+def _valid_unified_report(value: dict[str, object], plan: CloudCampaignPlan) -> bool:
+    dependencies = value.get("dependencies")
+    native = value.get("native")
+    embedding = value.get("embedding")
+    runtime = value.get("runtime")
+    finalization = value.get("finalization")
+    return (
+        value.get("schema") == "hyphae-transformer.hyphae-minilm-gemma-canary/v1"
+        and value.get("completed") is True
+        and value.get("passed") is True
+        and value.get("source_revision") == plan.revision
+        and isinstance(dependencies, dict)
+        and dependencies.get("hyphae_binary_sha256")
+        == "a00ea0cfc502ad63d65c42357664f7664f8a8c482fbdeb24a4f5511feceb45d0"
+        and dependencies.get("hyphae_wheel_sha256") == HYPHAE_WHEEL_SHA256
+        and dependencies.get("minilm_artifact_manifest_sha256")
+        == "e5d9d07b6db0c99cc4a2afa92047d57b84c3cb6ed48137ad3612601fdbe21411"
+        and dependencies.get("gemma_artifact_manifest_sha256")
+        == "662a2f15fe866f2350da4bfeefc746b0eb72c917d344dda2602df88230401561"
+        and isinstance(native, dict)
+        and native.get("protocol") == [1, 5]
+        and native.get("collection_definition_sha256") == (
+            "181552f7f9666546db8f09b3e89be98e99f4c4e09be227f6d257da93029ea527"
+        )
+        and native.get("durability") == "strict"
+        and native.get("strategy") == "exact_filtered"
+        and native.get("approximate") is False
+        and native.get("exact_reranked") is True
+        and native.get("restart_replay") is True
+        and isinstance(embedding, dict)
+        and embedding.get("dimensions") == 384
+        and embedding.get("ready") is True
+        and isinstance(runtime, dict)
+        and runtime.get("request_count") == 1
+        and runtime.get("decision") == "answer"
+        and isinstance(finalization, dict)
+        and finalization.get("status") == "completed"
+        and finalization.get("mailbox_accepted") == 1
+    )
+
+
+def _validate_hyphae_wheel(plan: CloudCampaignPlan) -> None:
+    path = plan.hyphae_sdk_wheel
+    if path is None or path.is_symlink() or not path.is_file():
+        raise ValueError("unified Hyphae SDK wheel is absent or unsafe")
+    if path.name != "hyphae_sdk-2.1.0-py3-none-any.whl" or path.stat().st_size != (
+        HYPHAE_WHEEL_BYTES
+    ):
+        raise ValueError("unified Hyphae SDK wheel coordinate differs")
+    import hashlib
+
+    if hashlib.sha256(path.read_bytes()).hexdigest() != HYPHAE_WHEEL_SHA256:
+        raise ValueError("unified Hyphae SDK wheel digest differs")
 
 
 def _write_process_evidence(
