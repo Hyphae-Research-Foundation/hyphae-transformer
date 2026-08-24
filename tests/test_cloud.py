@@ -449,6 +449,33 @@ def test_cloud_refuses_nonempty_artifact_directory(tmp_path: Path) -> None:
         execute_digitalocean_campaign(cloud_plan)
 
 
+def test_unified_hyphae_minilm_gemma_plan_is_strict(tmp_path: Path) -> None:
+    wheel = tmp_path / "hyphae_sdk-2.1.0-py3-none-any.whl"
+    source = Path(
+        "/tmp/opencode/hyphae-v210-artifacts/wheel/"
+        "hyphae_sdk-2.1.0-py3-none-any.whl"
+    )
+    if not source.is_file():
+        pytest.skip("exact Hyphae wheel is unavailable")
+    wheel.write_bytes(source.read_bytes())
+    cloud_plan = unified_plan(tmp_path, wheel)
+    summary = execute_digitalocean_campaign(cloud_plan, dry_run=True)
+    assert summary.status == "dry_run"
+    assert len(summary.dry_run_commands) == 6
+    assert summary.dry_run_commands[1][0] == "scp"
+    assert "--network=none" in " ".join(summary.dry_run_commands[3])
+    assert "--init" in " ".join(summary.dry_run_commands[3])
+    with pytest.raises(ValueError, match="unified campaign"):
+        CloudCampaignPlan(
+            **{
+                field: getattr(cloud_plan, field)
+                for field in CloudCampaignPlan.__dataclass_fields__
+                if field != "campaign_command"
+            },
+            campaign_command=("canary-hyphae-minilm-gemma-v1", "extra"),
+        )
+
+
 def gemma_plan(tmp_path: Path) -> CloudCampaignPlan:
     return CloudCampaignPlan(
         name="hyphae-e4b-control-smoke-x1",
@@ -503,6 +530,29 @@ def gemma_quoted_runtime_plan(tmp_path: Path) -> CloudCampaignPlan:
         max_lifetime_seconds=1200,
         max_cost_usd=1.5,
         accelerator="amd-rocm",
+    )
+
+
+def unified_plan(tmp_path: Path, wheel: Path) -> CloudCampaignPlan:
+    return CloudCampaignPlan(
+        name="hyphae-minilm-gemma-canary-v1",
+        region="mem1",
+        size="gpu-mi355x1-288gb-spot",
+        image="amddevelopercloud-pytorch2100rocm724",
+        ssh_key_id="1",
+        ssh_private_key=tmp_path / "key",
+        repository_url=(
+            "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git"
+        ),
+        revision="0123456789abcdef0123456789abcdef01234567",
+        data_command=("prepare-gemma4-e4b",),
+        campaign_command=("canary-hyphae-minilm-gemma-v1",),
+        artifact_directory=tmp_path / "unified-evidence",
+        hourly_rate_usd=4.5,
+        max_lifetime_seconds=1800,
+        max_cost_usd=2.25,
+        accelerator="amd-rocm",
+        hyphae_sdk_wheel=wheel,
     )
 
 
