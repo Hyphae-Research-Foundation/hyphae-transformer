@@ -402,7 +402,9 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
             "/runs/gemma4-e4b-smoke.json",
             *plan.campaign_command[1:],
         ]
-        inner = f"cd /workspace && PYTHONPATH=/workspace/src {shlex.join(command)}"
+        inner = (
+            f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}"
+        )
         return " && ".join(
             (
                 (
@@ -475,6 +477,8 @@ def _rocm_container_command(plan: CloudCampaignPlan) -> str:
             f"{plan.remote_data_root}:/data",
             "-v",
             f"{plan.remote_run_root}:/runs",
+            "-v",
+            f"{plan.remote_data_root}/python:/python",
             ROCM_PYTORCH_IMAGE,
         ]
     )
@@ -484,14 +488,17 @@ def _rocm_bootstrap_inner() -> str:
     return " && ".join(
         (
             (
-                "python -c \"import torch; assert torch.version.hip; "
+                "PYTHONPATH=/python python -c \"import torch; assert torch.version.hip; "
                 "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
                 "assert 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName\""
             ),
-            "python -m pip install transformers==5.14.1",
-            "python /workspace/scripts/download_gemma4_e4b.py --out /data/gemma4-e4b",
+            "python -m pip install --target /python transformers==5.14.1",
             (
-                "python /workspace/scripts/preflight_gemma4_e4b.py "
+                "PYTHONPATH=/python python /workspace/scripts/download_gemma4_e4b.py "
+                "--out /data/gemma4-e4b"
+            ),
+            (
+                "PYTHONPATH=/python python /workspace/scripts/preflight_gemma4_e4b.py "
                 "--model /data/gemma4-e4b --require-gpu"
             ),
         )
