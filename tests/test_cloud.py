@@ -89,6 +89,8 @@ class FakeRunner:
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
         if command[0] == "ssh" and command[-1] == "printf __HYPHAE_READY__":
             return subprocess.CompletedProcess(command, 0, "__HYPHAE_READY__", "")
+        if command[0] == "ssh" and command[-1].startswith("sha256sum "):
+            return subprocess.CompletedProcess(command, 0, f"{'a' * 64}  source.patch\n", "")
         if command[0] == "ssh" and command[-1].startswith("base64 -w0 "):
             payload = base64.b64encode(json.dumps({"passed": True}).encode()).decode()
             return subprocess.CompletedProcess(command, 0, payload, "")
