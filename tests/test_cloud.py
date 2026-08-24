@@ -5,6 +5,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from celiums_rezero.cloud.digitalocean import (
     CloudCampaignPlan,
     execute_digitalocean_campaign,
@@ -40,6 +42,7 @@ def test_cloud_dry_run_has_no_side_effects(tmp_path: Path) -> None:
         "droplet",
         "create",
     )
+    assert len(summary.dry_run_commands) == 5
     assert not (tmp_path / "artifacts").exists()
 
 
@@ -50,11 +53,13 @@ class FakeRunner:
         fail_campaign: bool = False,
         fail_create: bool = False,
         fail_delete: bool = False,
+        quoted_runtime: bool = False,
     ) -> None:
         self.commands: list[list[str]] = []
         self.fail_campaign = fail_campaign
         self.fail_create = fail_create
         self.fail_delete = fail_delete
+        self.quoted_runtime = quoted_runtime
 
     def run(
         self,
@@ -92,11 +97,16 @@ class FakeRunner:
             import tarfile
 
             report_name = (
-                "shadow-report.json"
+                "./quoted-runtime-canary-report.json"
+                if self.quoted_runtime
+                else "shadow-report.json"
                 if "shadow" in command[-1]
                 else "./training-report.json"
             )
-            report = json.dumps({"completed": True, "passed": True}).encode()
+            report_value = {"completed": True, "passed": True}
+            if self.quoted_runtime:
+                report_value["request_count"] = 1
+            report = json.dumps(report_value).encode()
             archive_bytes = io.BytesIO()
             with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
                 item = tarfile.TarInfo(report_name)
@@ -408,6 +418,35 @@ def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
         raise AssertionError("short cloud source revision was accepted")
 
 
+def test_gemma_quoted_runtime_plan_is_strict_and_retrieves_archive(
+    tmp_path: Path,
+) -> None:
+    cloud_plan = gemma_quoted_runtime_plan(tmp_path)
+    runner = FakeRunner(quoted_runtime=True)
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "canary_gemma4_e4b_quoted_runtime.py" in command[-1]
+    )
+    assert "--runtime-timeout-seconds 180" in campaign
+    assert "--source-patch-sha256" in campaign
+    assert (
+        cloud_plan.artifact_directory / "gemma4-e4b-quoted-runtime-canary.tar.gz"
+    ).is_file()
+
+
+def test_cloud_refuses_nonempty_artifact_directory(tmp_path: Path) -> None:
+    cloud_plan = gemma_quoted_runtime_plan(tmp_path)
+    cloud_plan.artifact_directory.mkdir(parents=True)
+    (cloud_plan.artifact_directory / "existing").write_text("do not overwrite")
+    with pytest.raises(FileExistsError, match="not empty"):
+        execute_digitalocean_campaign(cloud_plan)
+
+
 def gemma_plan(tmp_path: Path) -> CloudCampaignPlan:
     return CloudCampaignPlan(
         name="hyphae-e4b-control-smoke-x1",
@@ -435,6 +474,32 @@ def gemma_plan(tmp_path: Path) -> CloudCampaignPlan:
         hourly_rate_usd=4.5,
         max_lifetime_seconds=28_800,
         max_cost_usd=36,
+        accelerator="amd-rocm",
+    )
+
+
+def gemma_quoted_runtime_plan(tmp_path: Path) -> CloudCampaignPlan:
+    return CloudCampaignPlan(
+        name="hyphae-e4b-quoted-runtime-canary-v1",
+        region="mem1",
+        size="gpu-mi355x1-288gb-spot",
+        image="amddevelopercloud-pytorch2100rocm724",
+        ssh_key_id="1",
+        ssh_private_key=tmp_path / "key",
+        repository_url=(
+            "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git"
+        ),
+        revision="0123456789abcdef0123456789abcdef01234567",
+        data_command=("prepare-gemma4-e4b",),
+        campaign_command=(
+            "canary-gemma4-e4b-quoted-runtime-v1",
+            "--source-patch-sha256",
+            "a" * 64,
+        ),
+        artifact_directory=tmp_path / "quoted-artifacts" / "evidence",
+        hourly_rate_usd=4.5,
+        max_lifetime_seconds=1200,
+        max_cost_usd=1.5,
         accelerator="amd-rocm",
     )
 

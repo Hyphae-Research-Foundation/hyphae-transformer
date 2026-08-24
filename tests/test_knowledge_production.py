@@ -4,9 +4,19 @@ import hashlib
 import socket
 import struct
 import threading
+import time
+from dataclasses import replace
 from pathlib import Path
 
-from celiums_rezero.knowledge import SQLiteTenantStore, TenantId
+import pytest
+
+from celiums_rezero.knowledge import (
+    HYPHAE_210_RETRIEVAL_PROFILE,
+    GenerationRoutedEvidenceProvider,
+    GenerationRoutedRetriever,
+    SQLiteTenantStore,
+    TenantId,
+)
 from celiums_rezero.knowledge.generation import GenerationAuthority
 from celiums_rezero.knowledge.operations import AuditChain, render_prometheus
 from celiums_rezero.knowledge.orchestration import (
@@ -21,6 +31,7 @@ from celiums_rezero.knowledge.schemas import (
     EvidenceHit,
     FinalizationQueueSnapshot,
     GenerationManifest,
+    JobStatus,
     PublicationTarget,
 )
 from celiums_rezero.knowledge.security import ClamDScanner, ExternalDlpScanner
@@ -209,7 +220,10 @@ def test_audit_metrics_supervisor_and_gemma_boundary(tmp_path: Path) -> None:
     )
 
     class Evidence:
-        def retrieve_for_job(self, item: AcquisitionJob) -> EvidenceBundle:
+        def retrieve_for_job(
+            self, item: AcquisitionJob, *, timeout_seconds: float
+        ) -> EvidenceBundle:
+            assert timeout_seconds <= 5
             return EvidenceBundle(item.tenant, item.query_digest, item.corpus_generation, (hit,))
 
     class Runtime:
@@ -227,3 +241,123 @@ def test_audit_metrics_supervisor_and_gemma_boundary(tmp_path: Path) -> None:
         job, timeout_seconds=5
     )
     assert answer is not None and answer.answer == text
+
+
+def test_generation_routed_evidence_provider_binds_answering_job(tmp_path: Path) -> None:
+    tenant = TenantId("tenant_a")
+    authority = GenerationAuthority(store(tmp_path, tenant.value))
+    generation = GenerationManifest(
+        tenant=tenant,
+        generation_id="generation_one",
+        target=PublicationTarget(
+            hashlib.sha256(bytes(range(24))).hexdigest(),
+            41,
+            "semantic",
+        ),
+        parent_generation_id=None,
+        chunk_ids=("chunk_0000000000000001",),
+        ingest_idempotency_keys=("a" * 64,),
+        ingest_receipt_digests=("b" * 64,),
+    )
+    authority.register(generation)
+    verified = GenerationManifest(
+        tenant=generation.tenant,
+        generation_id=generation.generation_id,
+        target=generation.target,
+        parent_generation_id=None,
+        chunk_ids=generation.chunk_ids,
+        ingest_idempotency_keys=generation.ingest_idempotency_keys,
+        ingest_receipt_digests=generation.ingest_receipt_digests,
+        verification_token=hashlib.sha256(
+            b"generation-verification-v1\0"
+            + (generation.manifest_digest or "").encode()
+            + b"".join(value.encode() for value in generation.ingest_receipt_digests)
+        ).hexdigest(),
+    )
+    authority.store._complete_generation_manifest(generation, verified)
+    authority.activate(
+        generation.generation_id,
+        expected_revision=0,
+        actor="test",
+        reason="bootstrap",
+    )
+    query = "question"
+    body = "Verified quotation"
+
+    class Client:
+        def search_collection(self, collection, request, *, options=None):
+            assert collection == generation.target.collection
+            assert options is not None
+
+            class Response:
+                kind = "integrated_search"
+
+            response = Response()
+            response.value = {
+                "snapshot": {
+                    "directory_lineage": bytes(range(24)),
+                    "visible_csn": 7,
+                    "catalog_version": 3,
+                    "root_digest": bytes(range(32)),
+                    "logical_time_micros": 11,
+                },
+                "hits": [
+                    {
+                        "object_id": 17,
+                        "score": 0.03278688524590164,
+                        "doc_values": {
+                            "body": body,
+                            "source_id": "official_docs",
+                            "source_version": "v1",
+                            "content_digest": hashlib.sha256(body.encode()).hexdigest(),
+                            "corpus_generation": generation.generation_id,
+                        },
+                    }
+                ],
+                "vector_branches": [
+                    {
+                        "target": generation.target.vector_target,
+                        "strategy": "exact_filtered",
+                        "approximate": False,
+                        "exact_reranked": True,
+                    }
+                ],
+                "approximate": False,
+            }
+            return response
+
+    class Embedder:
+        profile = "fixture"
+
+        def embed(self, text: str) -> tuple[float, ...]:
+            assert text == query
+            return (0.25, 0.75)
+
+    provider = GenerationRoutedEvidenceProvider(
+        retriever=GenerationRoutedRetriever(
+            tenant=tenant,
+            authority=authority,
+            client=Client(),
+            profile=HYPHAE_210_RETRIEVAL_PROFILE,
+            embedder=Embedder(),
+            request_options_factory=lambda timeout: {
+                "deadline_micros": int((time.time() + timeout) * 1_000_000)
+            },
+        )
+    )
+    job = AcquisitionJob(
+        tenant=tenant,
+        query=query,
+        query_digest=hashlib.sha256(query.encode()).hexdigest(),
+        corpus_generation=generation.generation_id,
+        policy_version="policy-v1",
+        embedding_profile="fixture",
+        source_id="official_docs",
+        status=JobStatus.ANSWERING,
+    )
+
+    evidence = provider.retrieve_for_job(job, timeout_seconds=5)
+
+    assert evidence.hits[0].score == 1.0
+    with pytest.raises(ValueError, match="answering job"):
+        provider.retrieve_for_job(replace(job, status=JobStatus.READY), timeout_seconds=5)

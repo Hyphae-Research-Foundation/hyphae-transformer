@@ -79,7 +79,7 @@ class Gemma4E4BFrozenBackbone:
             family="gemma4",
             model_id=self.model_id,
             revision=self.revision,
-            artifact_manifest_sha256=self._artifact_manifest_digest(),
+            artifact_manifest_sha256=self.artifact_manifest_digest(),
             tokenizer_manifest_sha256=self.tokenizer_config_sha256,
             runtime_version="transformers-5.14.1",
             feature_contract="gemma4-e4b-it-layer41-final-valid-token-f32-v1",
@@ -127,8 +127,9 @@ class Gemma4E4BFrozenBackbone:
             if _sha256(path) != expected_digest:
                 raise ValueError(f"Gemma artifact digest mismatch: {name}")
 
-    def _artifact_manifest_digest(self) -> str:
-        payload = json.dumps(self.required_artifacts, sort_keys=True, separators=(",", ":"))
+    @classmethod
+    def artifact_manifest_digest(cls) -> str:
+        payload = json.dumps(cls.required_artifacts, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def _state_digest(self) -> str:

@@ -26,12 +26,18 @@ def run_supervised(
     timeout_seconds: float,
     grace_seconds: float = 2.0,
     maximum_output_bytes: int = 1_000_000,
+    input_bytes: bytes | None = None,
 ) -> SupervisedResult:
-    if not command or timeout_seconds <= 0 or grace_seconds <= 0:
+    if (
+        not command
+        or timeout_seconds <= 0
+        or grace_seconds <= 0
+        or len(input_bytes or b"") > 1_000_000
+    ):
         raise ValueError("supervised process limits are invalid")
     process = subprocess.Popen(
         command,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL if input_bytes is None else subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         shell=False,
@@ -40,11 +46,19 @@ def run_supervised(
         env={"PATH": os.environ.get("PATH", "")},
     )
     assert process.stdout is not None and process.stderr is not None
+    if process.stdin is not None:
+        os.set_blocking(process.stdin.fileno(), False)
     for stream in (process.stdout, process.stderr):
         os.set_blocking(stream.fileno(), False)
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ, "stdout")
     selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    pending_input = memoryview(input_bytes or b"")
+    if process.stdin is not None:
+        if pending_input:
+            selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+        else:
+            process.stdin.close()
     outputs = {"stdout": bytearray(), "stderr": bytearray()}
     deadline = time.monotonic() + timeout_seconds
     timed_out = False
@@ -57,6 +71,16 @@ def run_supervised(
                 break
             for key, _ in selector.select(min(remaining, 0.1)):
                 stream = cast(IO[bytes], key.fileobj)
+                if key.data == "stdin":
+                    try:
+                        written = os.write(stream.fileno(), pending_input)
+                    except BrokenPipeError:
+                        written = len(pending_input)
+                    pending_input = pending_input[written:]
+                    if not pending_input:
+                        selector.unregister(stream)
+                        stream.close()
+                    continue
                 chunk = os.read(stream.fileno(), 65_536)
                 if not chunk:
                     selector.unregister(stream)
@@ -69,7 +93,7 @@ def run_supervised(
                     raise RuntimeError("supervised process output exceeds its byte bound")
         if timed_out:
             try:
-                process.wait(timeout=grace_seconds)
+                process.wait(timeout=min(grace_seconds, 0.1))
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()

@@ -1,0 +1,38 @@
+{
+  "adapter": "celiums_rezero.knowledge.production_runtime:factory",
+  "adapter_config": {
+    "embedder_config": {},
+    "embedder_factory": "approved_tenant_providers:embedder_factory",
+    "finalization": {
+      "answer_timeout_seconds": 60,
+      "lease_safety_seconds": 5,
+      "max_answer_failures": 5,
+      "max_notification_failures": 8,
+      "notification_timeout_seconds": 30,
+      "retry_base_seconds": 5,
+      "retry_max_seconds": 300
+    },
+    "hyphae_client_factory": "approved_tenant_providers:hyphae_client_factory",
+    "hyphae_config": {
+      "api_key_file": "/var/lib/hyphae/tenant-a/owner.key",
+      "endpoint": "/run/hyphae/tenant-a.sock",
+      "sdk_version": "2.1.0"
+    },
+    "lease_seconds": 65,
+    "mailbox_id": "owner-events-v1",
+    "mailbox_path": "/var/lib/hyphae/tenant-a/mailbox.sqlite3",
+    "model": {
+      "bundle_path": "/opt/hyphae/models/gemma4-e4b-control-v3-seed17.tar.gz",
+      "bundle_sha256": "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
+      "device": "cuda:0",
+      "executable": "/opt/hyphae/bin/hyphae-governed-runtime",
+      "executable_sha256": "REPLACE_WITH_INSTALLED_EXECUTABLE_SHA256",
+      "model_path": "/opt/hyphae/models/gemma-4-E4B-it-ee0ef602"
+    },
+    "receipt_root": "/var/lib/hyphae/tenant-a/publication-receipts",
+    "schema": "hyphae-transformer.production-finalization/v1",
+    "worker_id": "tenant-a-finalizer"
+  },
+  "database": "/var/lib/hyphae/tenant-a/jobs.sqlite3",
+  "tenant": "tenant_a"
+}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
 from typing import Any, Protocol
@@ -83,6 +84,31 @@ class RetrievalConfig:
             raise ValueError("retrieval field names are invalid")
 
 
+@dataclass(frozen=True, slots=True)
+class RetrievalProfile:
+    """Root-owned retrieval policy independent of active generation routing."""
+
+    score_scale: float
+    limit: int = 8
+    candidate_limit: int = 32
+    lexical_weight: int = 1
+    vector_weight: int = 1
+    require_exact_vector_receipt: bool = True
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.score_scale) or self.score_scale <= 0:
+            raise ValueError("score scale must be finite and positive")
+        if not 1 <= self.limit <= 64 or not self.limit <= self.candidate_limit <= 10_000:
+            raise ValueError("retrieval result and candidate limits are invalid")
+        if min(self.lexical_weight, self.vector_weight) < 1:
+            raise ValueError("retrieval branch weights must be positive")
+
+
+HYPHAE_210_RETRIEVAL_PROFILE = RetrievalProfile(
+    score_scale=0.03278688524590164,
+)
+
+
 class HyphaeRetrievalGateway:
     """Read-only gateway bound to one tenant, collection, and corpus generation."""
 
@@ -93,6 +119,7 @@ class HyphaeRetrievalGateway:
         client: HyphaeSearchClient,
         config: RetrievalConfig,
         embedder: EmbeddingProvider | None = None,
+        request_options_factory: Callable[[float], object] | None = None,
     ) -> None:
         if config.vector_target is not None and embedder is None:
             raise ValueError("a vector target requires a pinned embedding provider")
@@ -100,14 +127,31 @@ class HyphaeRetrievalGateway:
         self.client = client
         self.config = config
         self.embedder = embedder
+        self.request_options_factory = request_options_factory
 
-    def retrieve(self, tenant: TenantId, query: str) -> EvidenceBundle:
+    def retrieve(
+        self,
+        tenant: TenantId,
+        query: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> EvidenceBundle:
         if tenant != self.tenant:
             raise PermissionError("retrieval gateway is bound to a different tenant")
+        options = None
+        if timeout_seconds is not None:
+            if not isfinite(timeout_seconds) or timeout_seconds <= 0:
+                raise ValueError("retrieval timeout must be finite and positive")
+            if self.request_options_factory is None:
+                raise ValueError("bounded retrieval requires a request options factory")
+            options = self.request_options_factory(timeout_seconds)
+            if options is None:
+                raise ValueError("request options factory returned no deadline options")
         normalized = normalize_query(query)
         response = self.client.search_collection(
             self.config.collection,
             self._request(normalized),
+            options=options,
         )
         kind = getattr(response, "kind", None)
         value = getattr(response, "value", None)
@@ -247,20 +291,28 @@ class GenerationRoutedRetriever:
         tenant: TenantId,
         authority: GenerationAuthority,
         client: HyphaeSearchClient,
+        profile: RetrievalProfile,
         embedder: EmbeddingProvider | None = None,
-        limit: int = 8,
-        candidate_limit: int = 32,
+        request_options_factory: Callable[[float], object] | None = None,
     ) -> None:
+        if profile.require_exact_vector_receipt and embedder is None:
+            raise ValueError("exact vector receipt requires a pinned embedding provider")
         self.tenant = tenant
         self.authority = authority
         self.client = client
+        self.profile = profile
         self.embedder = embedder
-        self.limit = limit
-        self.candidate_limit = candidate_limit
+        self.request_options_factory = request_options_factory
         if authority.store.tenant != tenant:
             raise PermissionError("generation authority belongs to another tenant")
 
-    def retrieve(self, tenant: TenantId, query: str) -> EvidenceBundle:
+    def retrieve(
+        self,
+        tenant: TenantId,
+        query: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> EvidenceBundle:
         if tenant != self.tenant:
             raise PermissionError("generation router is bound to another tenant")
         snapshot = self.authority.snapshot()
@@ -276,12 +328,17 @@ class GenerationRoutedRetriever:
                 vector_target=(
                     snapshot.target.vector_target if self.embedder is not None else None
                 ),
-                limit=self.limit,
-                candidate_limit=self.candidate_limit,
+                limit=self.profile.limit,
+                candidate_limit=self.profile.candidate_limit,
+                lexical_weight=self.profile.lexical_weight,
+                vector_weight=self.profile.vector_weight,
+                score_scale=self.profile.score_scale,
+                require_exact_vector_receipt=self.profile.require_exact_vector_receipt,
             ),
             embedder=self.embedder,
+            request_options_factory=self.request_options_factory,
         )
-        return gateway.retrieve(tenant, query)
+        return gateway.retrieve(tenant, query, timeout_seconds=timeout_seconds)
 
 
 def _snapshot_primitive(snapshot: dict[str, Any]) -> dict[str, object]:

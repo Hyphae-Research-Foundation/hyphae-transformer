@@ -1,0 +1,21 @@
+{
+  "accelerator": "amd-rocm",
+  "artifact_directory": "artifacts/gemma4-e4b-mi355x1-quoted-runtime-canary-v1",
+  "campaign_command": [
+    "canary-gemma4-e4b-quoted-runtime-v1",
+    "--source-patch-sha256",
+    "replace-with-source-patch-sha256"
+  ],
+  "data_command": ["prepare-gemma4-e4b"],
+  "hourly_rate_usd": 4.5,
+  "image": "amddevelopercloud-pytorch2100rocm724",
+  "max_cost_usd": 1.5,
+  "max_lifetime_seconds": 1200,
+  "name": "hyphae-e4b-quoted-runtime-canary-v1",
+  "region": "mem1",
+  "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
+  "revision": "replace-with-merged-40-character-commit-sha",
+  "size": "gpu-mi355x1-288gb-spot",
+  "ssh_key_id": "55649085",
+  "ssh_private_key": "/home/mario/.ssh/celiums-workers"
+}

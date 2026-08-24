@@ -11,6 +11,19 @@ pause claims, drain leases, activate by expected revision, observe metrics/audit
 rollback, then resume. Never down-migrate SQLite or delete the prior Hyphae collection
 during the rollback window.
 
+The shipped `celiums_rezero.knowledge.production_runtime:factory` is a strict
+finalization worker for an already active, verified generation. It uses the exact
+Hyphae 2.1.0 retrieval profile, a deployment-owned embedder and authenticated Hyphae
+client factory, the pinned supervised Gemma control-bundle runtime, and a separate
+tenant-local SQLite mailbox. Mailbox completion means durable local acceptance; any
+downstream external delivery remains a separate idempotent integration.
+
+The published Gemma control bundle may only select supplied evidence and return
+verbatim quotations. It does not authorize unconstrained natural-language generation.
+The systemd template exposes only `/dev/kfd` and `/dev/dri` for the qualified ROCm
+runtime. CPU-only tenants should remove those `DeviceAllow` entries; NVIDIA deployments
+require a separately reviewed device allowlist rather than broad `PrivateDevices=no`.
+
 The provided systemd template runs one bounded attempt through the shipped
 `hyphae-knowledge` command. The legacy `celiums-knowledge` alias remains available
 during migration. Each root-owned tenant config names an installed

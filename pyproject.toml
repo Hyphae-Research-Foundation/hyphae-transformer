@@ -38,6 +38,8 @@ hyphae-transformer = "celiums_rezero.cli:main"
 hyphae-knowledge = "celiums_rezero.knowledge.cli:main"
 celiums-rezero = "celiums_rezero.cli:main"
 celiums-knowledge = "celiums_rezero.knowledge.cli:main"
+hyphae-governed-runtime = "celiums_rezero.governed.runtime:main"
+hyphae-quoted-runtime-canary = "celiums_rezero.knowledge.canary_runtime:main"
 
 [project.urls]
 Repository = "https://github.com/Hyphae-Research-Foundation/hyphae-transformer"
@@ -45,6 +47,9 @@ Paper = "https://proceedings.mlr.press/v161/bachlechner21a.html"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/celiums_rezero"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.tmp-cert", "/artifacts", "/runs", "/checkpoints"]
 
 [tool.ruff]
 line-length = 100
