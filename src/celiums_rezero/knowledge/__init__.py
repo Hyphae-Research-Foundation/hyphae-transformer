@@ -11,6 +11,11 @@ from celiums_rezero.knowledge.acquisition import (
 )
 from celiums_rezero.knowledge.conformance import check_notification_sink
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
+from celiums_rezero.knowledge.embedding import (
+    EmbeddingIdentity,
+    MiniLML6V2EmbeddingProvider,
+    minilm_l6_v2_factory,
+)
 from celiums_rezero.knowledge.finalization import (
     DurableFinalizationWorker,
     FinalAnswer,
@@ -82,6 +87,7 @@ __all__ = [
     "DurableAcquisitionWorker",
     "DurableFinalizationWorker",
     "DurablePublicationAuthorizer",
+    "EmbeddingIdentity",
     "EvidenceBundle",
     "EvidenceHit",
     "ExternalDlpScanner",
@@ -106,6 +112,7 @@ __all__ = [
     "KnowledgeCoordinator",
     "KnowledgeResponse",
     "KnowledgeScheduler",
+    "MiniLML6V2EmbeddingProvider",
     "PermanentFinalizationError",
     "PublicationReceiptStore",
     "RetrievalConfig",
@@ -123,5 +130,6 @@ __all__ = [
     "TenantId",
     "TransientFinalizationError",
     "check_notification_sink",
+    "minilm_l6_v2_factory",
     "run_supervised",
 ]

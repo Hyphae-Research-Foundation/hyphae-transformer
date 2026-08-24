@@ -328,6 +328,7 @@ def test_generation_routed_evidence_provider_binds_answering_job(tmp_path: Path)
 
     class Embedder:
         profile = "fixture"
+        dimensions = 2
 
         def embed(self, text: str) -> tuple[float, ...]:
             assert text == query

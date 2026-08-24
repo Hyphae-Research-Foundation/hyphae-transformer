@@ -305,6 +305,7 @@ def test_sqlite_outbox_corruption_fails_closed(tmp_path: Path) -> None:
 
 class Embedder:
     profile = "fixture-v1"
+    dimensions = 2
 
     def embed(self, text: str) -> tuple[float, ...]:
         return (len(text) / 100, 0.5)

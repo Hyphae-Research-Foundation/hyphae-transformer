@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import struct
-import sys
-
-from hyphae_sdk.v2 import HyphaeClient, RequestOptions
 
 
 def framed(value: bytes) -> bytes:
@@ -37,7 +35,9 @@ def header(
     return value
 
 
-def definitions() -> tuple[bytes, ...]:
+def definitions(*, vector_dimensions: int = 2) -> tuple[bytes, ...]:
+    if not 1 <= vector_dimensions <= 4096:
+        raise ValueError("vector dimensions must be in [1, 4096]")
     database = bytes(
         header(kind=1, object_id=10, owner=0, object_name="database", parent=None)
     )
@@ -86,7 +86,7 @@ def definitions() -> tuple[bytes, ...]:
     collection.extend(struct.pack("<I", 9))
     collection.extend(name("semantic"))
     collection.append(1)
-    collection.extend(struct.pack("<H", 2))
+    collection.extend(struct.pack("<H", vector_dimensions))
     collection.append(3)
     collection.append(1)
     collection.extend(struct.pack("<IHH", 1000, 4, 2))
@@ -94,8 +94,14 @@ def definitions() -> tuple[bytes, ...]:
 
 
 def main() -> int:
-    endpoint = sys.argv[1]
-    values = definitions()
+    from hyphae_sdk.v2 import HyphaeClient, RequestOptions
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("endpoint")
+    parser.add_argument("--vector-dimensions", type=int, default=2)
+    arguments = parser.parse_args()
+    endpoint = arguments.endpoint
+    values = definitions(vector_dimensions=arguments.vector_dimensions)
     with HyphaeClient.local(endpoint) as client:
         for request_id, definition in enumerate(values, start=1001):
             response = client.catalog(
@@ -113,7 +119,8 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "collection_definition_sha256": hashlib.sha256(values[-1]).hexdigest()
+                "collection_definition_sha256": hashlib.sha256(values[-1]).hexdigest(),
+                "vector_dimensions": arguments.vector_dimensions,
             },
             sort_keys=True,
         )
