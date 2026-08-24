@@ -402,7 +402,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
             "/runs/gemma4-e4b-smoke.json",
             *plan.campaign_command[1:],
         ]
-        inner = f"cd /workspace && {shlex.join(command)}"
+        inner = f"cd /workspace && PYTHONPATH=/workspace/src {shlex.join(command)}"
         return " && ".join(
             (
                 (
@@ -489,7 +489,6 @@ def _rocm_bootstrap_inner() -> str:
                 "assert 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName\""
             ),
             "python -m pip install transformers==5.14.1",
-            "python -m pip install --no-deps -e /workspace",
             "python /workspace/scripts/download_gemma4_e4b.py --out /data/gemma4-e4b",
             (
                 "python /workspace/scripts/preflight_gemma4_e4b.py "
