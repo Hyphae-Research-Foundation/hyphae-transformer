@@ -27,6 +27,7 @@ class GovernedBatch:
     context: torch.Tensor
     evidence: torch.Tensor
     evidence_scores: torch.Tensor
+    host_control_features: torch.Tensor
     evidence_mask: torch.Tensor
     action_targets: torch.Tensor
     pointer_targets: torch.Tensor
@@ -163,6 +164,20 @@ def make_batch(
     )
     pointers = torch.zeros_like(mask, dtype=torch.float32)
     actions = torch.empty(len(records), dtype=torch.long, device=device)
+    host_control = torch.tensor(
+        [
+            (
+                float(record.blocked),
+                float(record.conflicting),
+                float(len(items) == 0),
+                max((hit.score for hit in items), default=0.0),
+                float(len(items)),
+            )
+            for record, items in zip(records, ordered_evidence, strict=True)
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
     action_index = {action: index for index, action in enumerate(ControlAction)}
     flattened = tuple(hit for items in ordered_evidence for hit in items)
     flattened_features = (
@@ -189,7 +204,7 @@ def make_batch(
                 pointers[row, column] = float(hit.handle in selected)
             offset += len(ordered)
         actions[row] = action_index[record.target.action]
-    return GovernedBatch(context, evidence, scores, mask, actions, pointers)
+    return GovernedBatch(context, evidence, scores, host_control, mask, actions, pointers)
 
 
 def materialize_governed_batch(
@@ -217,6 +232,9 @@ def materialize_governed_batch(
         context=torch.cat(tuple(batch.context for batch in batches)),
         evidence=torch.cat(tuple(batch.evidence for batch in batches)),
         evidence_scores=torch.cat(tuple(batch.evidence_scores for batch in batches)),
+        host_control_features=torch.cat(
+            tuple(batch.host_control_features for batch in batches)
+        ),
         evidence_mask=torch.cat(tuple(batch.evidence_mask for batch in batches)),
         action_targets=torch.cat(tuple(batch.action_targets for batch in batches)),
         pointer_targets=torch.cat(tuple(batch.pointer_targets for batch in batches)),

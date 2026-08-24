@@ -62,6 +62,7 @@ def main() -> int:
             batch.evidence,
             batch.evidence_mask,
             batch.evidence_scores,
+            batch.host_control_features,
         )
         action_loss = nn.functional.cross_entropy(logits.action_logits, batch.action_targets)
         finite_pointers = logits.evidence_logits.masked_fill(~batch.evidence_mask, 0)
