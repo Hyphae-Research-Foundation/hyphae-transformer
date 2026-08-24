@@ -1017,29 +1017,64 @@ def _delete_and_verify_droplet(
             deletion_error = error
             if attempt < 2 and callable(sleep):
                 sleep(5)
-    if deletion_error is not None:
-        raise deletion_error
 
     deadline = time.monotonic() + 60
+    last_inventory_error: Exception | None = None
+    observed_present = False
     while time.monotonic() < deadline:
-        inventory = runner.run(
-            [
-                "doctl",
-                "compute",
-                "droplet",
-                "get",
-                str(droplet_id),
-                "--output",
-                "json",
-            ],
-            check=False,
-            timeout=60,
-        )
-        if inventory.returncode != 0:
-            return
+        try:
+            inventory = runner.run(
+                [
+                    "doctl",
+                    "compute",
+                    "droplet",
+                    "get",
+                    str(droplet_id),
+                    "--output",
+                    "json",
+                ],
+                check=False,
+                timeout=60,
+            )
+        except Exception as error:
+            last_inventory_error = error
+        else:
+            if inventory.returncode == 0:
+                observed_present = True
+            elif _is_droplet_get_404(inventory, droplet_id):
+                return
+            else:
+                last_inventory_error = RuntimeError(
+                    "Droplet inventory probe did not return an explicit 404"
+                )
         if callable(sleep):
             sleep(min(5, max(0, deadline - time.monotonic())))
-    raise RuntimeError("deleted Droplet remains in DigitalOcean inventory")
+    if observed_present:
+        raise RuntimeError("deleted Droplet remains in DigitalOcean inventory")
+    failure = RuntimeError("Droplet deletion was not confirmed by an explicit 404")
+    if last_inventory_error is not None:
+        raise failure from last_inventory_error
+    if deletion_error is not None:
+        raise failure from deletion_error
+    raise failure
+
+
+def _is_droplet_get_404(
+    result: subprocess.CompletedProcess[str], droplet_id: int
+) -> bool:
+    if result.returncode == 0:
+        return False
+    try:
+        value = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    errors = value.get("errors") if isinstance(value, dict) else None
+    if not isinstance(errors, list) or len(errors) != 1 or not isinstance(errors[0], dict):
+        return False
+    detail = errors[0].get("detail")
+    return isinstance(detail, str) and re.search(
+        rf"^GET \S*/v2/droplets/{droplet_id}: 404(?:\s|$)", detail
+    ) is not None
 
 
 def _validate_gemma_smoke_command(command: tuple[str, ...]) -> None:

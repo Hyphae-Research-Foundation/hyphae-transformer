@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
+import celiums_rezero.cloud.digitalocean as digitalocean
 from celiums_rezero.cloud.digitalocean import (
     CloudCampaignPlan,
+    _is_droplet_get_404,
     execute_digitalocean_campaign,
 )
 
@@ -54,12 +56,14 @@ class FakeRunner:
         fail_create: bool = False,
         fail_delete: bool = False,
         quoted_runtime: bool = False,
+        inventory_responses: list[subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self.commands: list[list[str]] = []
         self.fail_campaign = fail_campaign
         self.fail_create = fail_create
         self.fail_delete = fail_delete
         self.quoted_runtime = quoted_runtime
+        self.inventory_responses = inventory_responses or []
 
     def run(
         self,
@@ -124,7 +128,25 @@ class FakeRunner:
         if self.fail_delete and command[:4] == ["doctl", "compute", "droplet", "delete"]:
             raise subprocess.CalledProcessError(1, command, stderr="deletion failed")
         if command[:4] == ["doctl", "compute", "droplet", "get"]:
-            return subprocess.CompletedProcess(command, 1, "", "not found")
+            if self.inventory_responses:
+                response = self.inventory_responses.pop(0)
+                return subprocess.CompletedProcess(
+                    command,
+                    response.returncode,
+                    response.stdout,
+                    response.stderr,
+                )
+            payload = {
+                "errors": [
+                    {
+                        "detail": (
+                            "GET https://api.digitalocean.com/v2/droplets/42: 404 "
+                            "The resource you were accessing could not be found."
+                        )
+                    }
+                ]
+            }
+            return subprocess.CompletedProcess(command, 1, json.dumps(payload), "")
         if self.fail_campaign and command[0] == "ssh" and "timeout --signal" in command[-1]:
             error = subprocess.CalledProcessError(1, command, stderr="campaign failed")
             if check:
@@ -185,9 +207,23 @@ def test_campaign_timeout_allows_cleanup_grace(tmp_path: Path) -> None:
     assert campaign_calls
 
 
-def test_cloud_executor_reports_deletion_failure(tmp_path: Path) -> None:
-    runner = FakeRunner(fail_delete=True)
-    summary = execute_digitalocean_campaign(plan(tmp_path), runner=runner, sleep=lambda _: None)
+def test_cloud_executor_reports_deletion_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(digitalocean.time, "monotonic", lambda: clock[0])
+    runner = FakeRunner(
+        fail_delete=True,
+        inventory_responses=[
+            subprocess.CompletedProcess([], 1, '{"errors":[{"detail":"GET x: 500"}]}', "")
+            for _ in range(20)
+        ],
+    )
+    summary = execute_digitalocean_campaign(
+        plan(tmp_path),
+        runner=runner,
+        sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
     assert summary.status == "failed"
     assert summary.failure is not None and "DropletDeletionError" in summary.failure
     delete_attempts = [
@@ -196,6 +232,65 @@ def test_cloud_executor_reports_deletion_failure(tmp_path: Path) -> None:
         if command[:4] == ["doctl", "compute", "droplet", "delete"]
     ]
     assert len(delete_attempts) == 3
+
+
+def test_cleanup_accepts_delayed_404_after_all_delete_attempts_fail(
+    tmp_path: Path,
+) -> None:
+    present = subprocess.CompletedProcess([], 0, '[{"id":42}]', "")
+    absent = subprocess.CompletedProcess(
+        [],
+        1,
+        json.dumps(
+            {
+                "errors": [
+                    {
+                        "detail": (
+                            "GET https://api.digitalocean.com/v2/droplets/42: 404 "
+                            "The resource you were accessing could not be found."
+                        )
+                    }
+                ]
+            }
+        ),
+        "",
+    )
+    runner = FakeRunner(
+        fail_delete=True,
+        inventory_responses=[present, absent],
+    )
+    summary = execute_digitalocean_campaign(plan(tmp_path), runner=runner, sleep=lambda _: None)
+    assert summary.status == "completed"
+    assert summary.failure is None
+    assert len(
+        [
+            command
+            for command in runner.commands
+            if command[:4] == ["doctl", "compute", "droplet", "delete"]
+        ]
+    ) == 3
+
+
+@pytest.mark.parametrize(
+    "stdout,expected",
+    [
+        (
+            '{"errors":[{"detail":"GET https://api.digitalocean.com/v2/'
+            'droplets/42: 404 not found"}]}',
+            True,
+        ),
+        (
+            '{"errors":[{"detail":"GET https://api.digitalocean.com/v2/'
+            'droplets/43: 404 not found"}]}',
+            False,
+        ),
+        ('{"errors":[{"detail":"GET x: 500"}]}', False),
+        ("not found", False),
+    ],
+)
+def test_droplet_404_parser_is_strict(stdout: str, expected: bool) -> None:
+    result = subprocess.CompletedProcess([], 1, stdout, "")
+    assert _is_droplet_get_404(result, 42) is expected
 
 
 def test_gemma_rocm_plan_is_strictly_allowlisted(tmp_path: Path) -> None:
