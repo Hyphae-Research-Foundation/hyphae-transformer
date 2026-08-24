@@ -204,3 +204,23 @@ def test_score_aware_head_can_separate_pointer_targets() -> None:
         torch.tensor([[0.95, 0.4]]),
     )
     assert (torch.sigmoid(logits.evidence_logits) >= 0.5).tolist() == [[True, False]]
+
+
+def test_pointer_policy_prior_separates_sufficient_evidence() -> None:
+    head = GovernedControlHead(
+        4,
+        pointer_policy_score=0.72,
+        pointer_policy_scale=20,
+    )
+    with torch.no_grad():
+        head.context.weight.zero_()
+        head.evidence.weight.zero_()
+    logits = head(
+        torch.ones((1, 4)),
+        torch.ones((1, 3, 4)),
+        torch.ones((1, 3), dtype=torch.bool),
+        torch.tensor([[0.95, 0.85, 0.4]]),
+    )
+    assert (torch.sigmoid(logits.evidence_logits) >= 0.5).tolist() == [
+        [True, True, False]
+    ]

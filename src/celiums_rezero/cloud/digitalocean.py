@@ -94,13 +94,19 @@ class CloudCampaignPlan:
             "smoke-gemma4-e4b",
             "train-gemma4-e4b",
             "train-gemma4-e4b-v2",
+            "train-gemma4-e4b-v3",
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
             raise ValueError("cloud accelerator is not allowlisted")
         gemma_workload = self.data_command[0] == "prepare-gemma4-e4b" or (
             self.campaign_command[0]
-            in {"smoke-gemma4-e4b", "train-gemma4-e4b", "train-gemma4-e4b-v2"}
+            in {
+                "smoke-gemma4-e4b",
+                "train-gemma4-e4b",
+                "train-gemma4-e4b-v2",
+                "train-gemma4-e4b-v3",
+            }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
             raise ValueError("Gemma E4B workload requires the AMD ROCm executor")
@@ -120,6 +126,8 @@ class CloudCampaignPlan:
             _validate_gemma_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-v2":
             _validate_gemma_v2_training_command(self.campaign_command)
+        if self.campaign_command[0] == "train-gemma4-e4b-v3":
+            _validate_gemma_v3_training_command(self.campaign_command)
         for value in (
             self.remote_root,
             self.remote_data_root,
@@ -402,6 +410,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "smoke-gemma4-e4b",
         "train-gemma4-e4b",
         "train-gemma4-e4b-v2",
+        "train-gemma4-e4b-v3",
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
@@ -417,7 +426,9 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 *plan.campaign_command[1:],
             ]
         else:
-            version = "v2" if plan.campaign_command[0].endswith("-v2") else "v1"
+            version = plan.campaign_command[0].rsplit("-", 1)[-1]
+            if version not in {"v2", "v3"}:
+                version = "v1"
             command = [
                 "python",
                 "/workspace/scripts/train_gemma4_e4b_control.py",
@@ -696,6 +707,31 @@ def _validate_gemma_v2_training_command(command: tuple[str, ...]) -> None:
         "0.5",
     ):
         raise ValueError("Gemma E4B v2 training command differs from preregistration")
+
+
+def _validate_gemma_v3_training_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "train-gemma4-e4b-v3",
+        "--seeds",
+        "17",
+        "29",
+        "43",
+        "--epochs",
+        "200",
+        "--learning-rate",
+        "0.05",
+        "--evidence-loss-weight",
+        "2.0",
+        "--gradient-clip",
+        "1.0",
+        "--feature-batch-size",
+        "8",
+        "--pointer-threshold",
+        "0.5",
+        "--minimum-confidence",
+        "0.5",
+    ):
+        raise ValueError("Gemma E4B v3 training command differs from preregistration")
 
 
 def _remaining_lifetime(

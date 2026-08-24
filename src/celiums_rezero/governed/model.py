@@ -22,6 +22,8 @@ class GovernedControlHead(nn.Module):
         pointer_rank: int = 32,
         normalized_features: bool = False,
         use_evidence_scores: bool = False,
+        pointer_policy_score: float | None = None,
+        pointer_policy_scale: float = 1.0,
     ) -> None:
         super().__init__()
         self.action = nn.Linear(hidden_size, 3)
@@ -30,6 +32,8 @@ class GovernedControlHead(nn.Module):
         self.scale = pointer_rank**-0.5
         self.normalized_features = normalized_features
         self.evidence_score = nn.Linear(1, 1) if use_evidence_scores else None
+        self.pointer_policy_score = pointer_policy_score
+        self.pointer_policy_scale = pointer_policy_scale
 
     def forward(
         self,
@@ -50,6 +54,12 @@ class GovernedControlHead(nn.Module):
             if evidence_scores is None or evidence_scores.shape != evidence_mask.shape:
                 raise ValueError("evidence scores are required by this control head")
             pointers = pointers + self.evidence_score(evidence_scores.unsqueeze(-1)).squeeze(-1)
+        if self.pointer_policy_score is not None:
+            if evidence_scores is None or evidence_scores.shape != evidence_mask.shape:
+                raise ValueError("evidence scores are required by the pointer policy prior")
+            pointers = pointers + self.pointer_policy_scale * (
+                evidence_scores - self.pointer_policy_score
+            )
         pointers = pointers.masked_fill(~evidence_mask, -torch.inf)
         return ControlLogits(self.action(context_features), pointers)
 
