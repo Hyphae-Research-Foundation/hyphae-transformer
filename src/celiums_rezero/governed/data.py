@@ -160,6 +160,14 @@ def make_batch(
     pointers = torch.zeros_like(mask, dtype=torch.float32)
     actions = torch.empty(len(records), dtype=torch.long, device=device)
     action_index = {action: index for index, action in enumerate(ControlAction)}
+    flattened = tuple(hit for items in ordered_evidence for hit in items)
+    flattened_features = (
+        backbone.encode(tuple(hit.text for hit in flattened), device=device)
+        if flattened
+        else torch.empty((0, hidden), dtype=torch.float32, device=device)
+    )
+    validate_frozen_features(backbone, flattened_features, items=len(flattened))
+    offset = 0
     for row, (record, ordered) in enumerate(
         zip(records, ordered_evidence, strict=True)
     ):
@@ -167,14 +175,44 @@ def make_batch(
             selected = set(record.target.evidence_handles)
             if not selected <= {hit.handle for hit in ordered}:
                 raise ValueError("target evidence was removed by the item bound")
-            encoded = backbone.encode(tuple(hit.text for hit in ordered), device=device)
-            validate_frozen_features(backbone, encoded, items=len(ordered))
+            encoded = flattened_features[offset : offset + len(ordered)]
             evidence[row, : len(ordered)] = encoded
             mask[row, : len(ordered)] = True
             for column, hit in enumerate(ordered):
                 pointers[row, column] = float(hit.handle in selected)
+            offset += len(ordered)
         actions[row] = action_index[record.target.action]
     return GovernedBatch(context, evidence, mask, actions, pointers)
+
+
+def materialize_governed_batch(
+    records: tuple[TrajectoryStep, ...],
+    backbone: FrozenTextBackbone,
+    *,
+    maximum_evidence_items: int,
+    feature_batch_size: int,
+    device: torch.device,
+) -> GovernedBatch:
+    if feature_batch_size < 1:
+        raise ValueError("feature batch size must be positive")
+    batches = tuple(
+        make_batch(
+            records[start : start + feature_batch_size],
+            backbone,
+            maximum_evidence_items=maximum_evidence_items,
+            device=device,
+        )
+        for start in range(0, len(records), feature_batch_size)
+    )
+    if not batches:
+        raise ValueError("governed batch cannot be empty")
+    return GovernedBatch(
+        context=torch.cat(tuple(batch.context for batch in batches)),
+        evidence=torch.cat(tuple(batch.evidence for batch in batches)),
+        evidence_mask=torch.cat(tuple(batch.evidence_mask for batch in batches)),
+        action_targets=torch.cat(tuple(batch.action_targets for batch in batches)),
+        pointer_targets=torch.cat(tuple(batch.pointer_targets for batch in batches)),
+    )
 
 
 def _trajectory(value: dict[str, object]) -> TrajectoryStep:

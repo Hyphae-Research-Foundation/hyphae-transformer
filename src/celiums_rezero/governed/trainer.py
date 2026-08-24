@@ -14,7 +14,7 @@ import torch
 from torch import nn
 
 from celiums_rezero.governed.backbone import FrozenTextBackbone
-from celiums_rezero.governed.data import make_batch
+from celiums_rezero.governed.data import GovernedBatch, make_batch
 from celiums_rezero.governed.model import GovernedControlHead
 from celiums_rezero.governed.schemas import TrajectoryStep
 from celiums_rezero.lab.serialization import canonical_json
@@ -54,6 +54,7 @@ def train_control_head(
     checkpoint: Path,
     maximum_evidence_items: int = 8,
     deadline: float | None = None,
+    batch: GovernedBatch | None = None,
 ) -> ControlTrainSummary:
     random.seed(config.seed)
     torch.manual_seed(config.seed)
@@ -64,12 +65,15 @@ def train_control_head(
     before = canonical_json(backbone.identity)
     state_before = backbone.state_fingerprint()
     losses: list[float] = []
-    batch = make_batch(
-        records,
-        backbone,
-        maximum_evidence_items=maximum_evidence_items,
-        device=device,
-    )
+    if batch is None:
+        batch = make_batch(
+            records,
+            backbone,
+            maximum_evidence_items=maximum_evidence_items,
+            device=device,
+        )
+    elif batch.action_targets.shape != (len(records),) or batch.context.device != device:
+        raise ValueError("precomputed governed training batch is invalid")
     for _ in range(config.epochs):
         if deadline is not None and time.perf_counter() >= deadline:
             raise TimeoutError("governed training wall-time budget exceeded")

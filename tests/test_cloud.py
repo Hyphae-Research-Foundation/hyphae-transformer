@@ -87,6 +87,18 @@ class FakeRunner:
         if command[0] == "ssh" and command[-1].startswith("base64 -w0 "):
             payload = base64.b64encode(json.dumps({"passed": True}).encode()).decode()
             return subprocess.CompletedProcess(command, 0, payload, "")
+        if command[0] == "ssh" and command[-1].startswith("tar -C "):
+            import io
+            import tarfile
+
+            report = json.dumps({"completed": True, "passed": False}).encode()
+            archive_bytes = io.BytesIO()
+            with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
+                item = tarfile.TarInfo("./training-report.json")
+                item.size = len(report)
+                archive.addfile(item, io.BytesIO(report))
+            payload = base64.b64encode(archive_bytes.getvalue()).decode()
+            return subprocess.CompletedProcess(command, 0, payload, "")
         if self.fail_delete and command[:4] == ["doctl", "compute", "droplet", "delete"]:
             raise subprocess.CalledProcessError(1, command, stderr="deletion failed")
         if command[:4] == ["doctl", "compute", "droplet", "get"]:
@@ -253,6 +265,27 @@ def test_gemma_rocm_bootstrap_persists_python_dependencies(tmp_path: Path) -> No
     assert "/opt/celiums-data/python:/python" in bootstrap
 
 
+def test_gemma_training_plan_is_strict_and_retrieves_archive(tmp_path: Path) -> None:
+    cloud_plan = gemma_training_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    assert (cloud_plan.artifact_directory / "gemma4-e4b-training.tar.gz").is_file()
+    report = json.loads(
+        (cloud_plan.artifact_directory / "training-report.json").read_text()
+    )
+    assert report == {"completed": True, "passed": False}
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "train_gemma4_e4b_control.py" in command[-1]
+    )
+    assert "--seeds 17 29 43" in campaign
+    assert "--feature-batch-size 8" in campaign
+
+
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
     values = {
         field: getattr(plan(tmp_path), field)
@@ -289,6 +322,44 @@ def gemma_plan(tmp_path: Path) -> CloudCampaignPlan:
             "8",
             "--max-vram-gib",
             "240",
+        ),
+        artifact_directory=tmp_path / "artifacts",
+        hourly_rate_usd=4.5,
+        max_lifetime_seconds=28_800,
+        max_cost_usd=36,
+        accelerator="amd-rocm",
+    )
+
+
+def gemma_training_plan(tmp_path: Path) -> CloudCampaignPlan:
+    return CloudCampaignPlan(
+        name="hyphae-e4b-control-train-x1",
+        region="mem1",
+        size="gpu-mi355x1-288gb-spot",
+        image="amddevelopercloud-pytorch2100rocm724",
+        ssh_key_id="1",
+        ssh_private_key=tmp_path / "key",
+        repository_url=(
+            "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git"
+        ),
+        revision="0123456789abcdef0123456789abcdef01234567",
+        data_command=("prepare-gemma4-e4b",),
+        campaign_command=(
+            "train-gemma4-e4b",
+            "--seeds",
+            "17",
+            "29",
+            "43",
+            "--epochs",
+            "3",
+            "--learning-rate",
+            "0.001",
+            "--evidence-loss-weight",
+            "1.0",
+            "--gradient-clip",
+            "1.0",
+            "--feature-batch-size",
+            "8",
         ),
         artifact_directory=tmp_path / "artifacts",
         hourly_rate_usd=4.5,
