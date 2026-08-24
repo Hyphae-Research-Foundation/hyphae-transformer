@@ -2,6 +2,7 @@
 
 from celiums_rezero.governed.backbone import FixtureBackboneV1, PinnedBackboneIdentity
 from celiums_rezero.governed.deployment import (
+    AuditedShadowObserver,
     GovernedShadowController,
     ShadowControlResult,
     build_deployment_bundle,
@@ -13,6 +14,7 @@ from celiums_rezero.governed.schemas import ControlAction, ControlTarget, Trajec
 from celiums_rezero.governed.trainer import ControlTrainConfig, train_control_head
 
 __all__ = [
+    "AuditedShadowObserver",
     "ControlAction",
     "ControlTarget",
     "ControlTrainConfig",

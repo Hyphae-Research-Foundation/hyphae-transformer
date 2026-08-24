@@ -7,6 +7,7 @@ import hashlib
 import json
 import tarfile
 import tempfile
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol, cast
@@ -16,6 +17,7 @@ import torch
 from celiums_rezero.governed.backbone import FrozenTextBackbone, validate_frozen_features
 from celiums_rezero.governed.model import GovernedControlHead, decode_control
 from celiums_rezero.governed.schemas import ControlAction
+from celiums_rezero.knowledge.operations import AuditChain
 from celiums_rezero.knowledge.schemas import (
     EvidenceBundle,
     EvidenceHit,
@@ -361,6 +363,46 @@ class GovernedShadowController:
             ),
             self.manifest.bundle_id,
         )
+
+
+class AuditedShadowObserver:
+    def __init__(self, controller: GovernedShadowController, audit: AuditChain) -> None:
+        self.controller = controller
+        self.audit = audit
+
+    def observe(
+        self,
+        *,
+        query: str,
+        evidence: EvidenceBundle,
+        host_decision: SufficiencyDecision,
+    ) -> ShadowControlResult:
+        started = time.perf_counter_ns()
+        result = self.controller.observe(
+            query=query,
+            evidence=evidence,
+            host_decision=host_decision,
+        )
+        latency_us = (time.perf_counter_ns() - started) // 1000
+        self.audit.append(
+            occurred_at_us=time.time_ns() // 1000,
+            event_type="governed_control_shadow",
+            subject_digest=hashlib.sha256(
+                f"{evidence.tenant.value}\0{evidence.query_digest}".encode()
+            ).hexdigest(),
+            outcome="divergent" if result.divergent else "matched",
+            detail={
+                "bundle_id": result.bundle_id,
+                "host_decision": result.host_decision.value,
+                "predicted_action": result.predicted_action.value,
+                "selected_handles": list(result.selected_handles),
+                "action_confidence": result.action_confidence,
+                "latency_us": latency_us,
+                "corpus_generation": evidence.corpus_generation,
+                "snapshot_fingerprint": evidence.snapshot_fingerprint,
+            },
+        )
+        return result
 
 
 def _context_text(query: str, evidence: tuple[EvidenceHit, ...], bundle: EvidenceBundle) -> str:
