@@ -238,7 +238,19 @@ def test_gemma_rocm_campaign_sets_source_pythonpath(tmp_path: Path) -> None:
         for command in runner.commands
         if command[0] == "ssh" and "smoke_gemma4_e4b.py" in command[-1]
     )
-    assert "PYTHONPATH=/workspace/src" in campaign
+    assert "PYTHONPATH=/workspace/src:/python" in campaign
+
+
+def test_gemma_rocm_bootstrap_persists_python_dependencies(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    execute_digitalocean_campaign(gemma_plan(tmp_path), runner=runner, sleep=lambda _: None)
+    bootstrap = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "git clone" in command[-1]
+    )
+    assert "pip install --target /python transformers==5.14.1" in bootstrap
+    assert "/opt/celiums-data/python:/python" in bootstrap
 
 
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
