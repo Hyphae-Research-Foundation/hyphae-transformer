@@ -101,7 +101,7 @@ class Gemma4E4BFrozenBackbone:
         if int(batch["input_ids"].shape[1]) > 512:
             raise ValueError("Gemma governed prompt exceeds the 512-token preregistration")
         batch = {name: value.to(self.device) for name, value in batch.items()}
-        with torch.inference_mode():
+        with torch.no_grad():
             output = self.model(**batch, output_hidden_states=True, use_cache=False)
             hidden = output.hidden_states[self.hidden_layer + 1]
             positions = torch.arange(hidden.shape[1], device=self.device).expand_as(
@@ -109,7 +109,7 @@ class Gemma4E4BFrozenBackbone:
             )
             index = positions.masked_fill(batch["attention_mask"] == 0, -1).max(-1).values
             rows = torch.arange(hidden.shape[0], device=self.device)
-            features = hidden[rows, index].float().detach()
+            features = hidden[rows, index].float().detach().clone()
         if self._state_digest() != self._state:
             raise RuntimeError("Gemma backbone state changed during feature extraction")
         return cast(torch.Tensor, features)
