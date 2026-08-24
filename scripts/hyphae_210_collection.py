@@ -8,8 +8,6 @@ import hashlib
 import json
 import struct
 
-from hyphae_sdk.v2 import HyphaeClient, RequestOptions
-
 
 def framed(value: bytes) -> bytes:
     return struct.pack("<I", len(value)) + value
@@ -96,6 +94,8 @@ def definitions(*, vector_dimensions: int = 2) -> tuple[bytes, ...]:
 
 
 def main() -> int:
+    from hyphae_sdk.v2 import HyphaeClient, RequestOptions
+
     parser = argparse.ArgumentParser()
     parser.add_argument("endpoint")
     parser.add_argument("--vector-dimensions", type=int, default=2)
