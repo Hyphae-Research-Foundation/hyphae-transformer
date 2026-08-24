@@ -345,6 +345,21 @@ def test_gemma_shadow_plan_is_strict(tmp_path: Path) -> None:
     assert (cloud_plan.artifact_directory / "shadow-report.json").is_file()
 
 
+def test_gemma_shadow_v2_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_shadow_v2_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "run_gemma4_e4b_shadow.py" in command[-1]
+    )
+    assert "gemma4_e4b_shadow_external_v2.json" in campaign
+
+
 def test_gemma_shadow_retrieval_preserves_completed_failed_gates(
     tmp_path: Path,
 ) -> None:
@@ -543,3 +558,15 @@ def gemma_shadow_plan(tmp_path: Path) -> CloudCampaignPlan:
         max_cost_usd=9,
         accelerator="amd-rocm",
     )
+
+
+def gemma_shadow_v2_plan(tmp_path: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(gemma_shadow_plan(tmp_path), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-e4b-shadow-external-v2",
+        campaign_command=("shadow-gemma4-e4b-v2", *values["campaign_command"][1:]),
+    )
+    return CloudCampaignPlan(**values)
