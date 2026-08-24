@@ -31,6 +31,8 @@ def evaluate_control_head(
     maximum_evidence_items: int = 8,
     gates: dict[str, float] | None = None,
     batch: GovernedBatch | None = None,
+    minimum_confidence: float = 0.7,
+    pointer_threshold: float = 0.5,
 ) -> ControlEvaluation:
     head.eval()
     try:
@@ -46,12 +48,19 @@ def evaluate_control_head(
         )
     elif batch.action_targets.shape != (len(records),) or batch.context.device != device:
         raise ValueError("precomputed governed evaluation batch is invalid")
-    logits = head(batch.context, batch.evidence, batch.evidence_mask)
+    logits = head(
+        batch.context,
+        batch.evidence,
+        batch.evidence_mask,
+        batch.evidence_scores,
+    )
     actions, pointers = decode_control(
         logits,
         batch.evidence_mask,
         blocked=torch.tensor([record.blocked for record in records], device=device),
         conflicting=torch.tensor([record.conflicting for record in records], device=device),
+        minimum_confidence=minimum_confidence,
+        pointer_threshold=pointer_threshold,
     )
     action_accuracy = float((actions == batch.action_targets).float().mean())
     answer_index = list(ControlAction).index(ControlAction.ANSWER)

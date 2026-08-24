@@ -28,11 +28,20 @@ class ControlTrainConfig:
     gradient_clip: float = 1.0
     seed: int = 17
     device: str = "cpu"
+    optimizer: str = "adamw"
+    weight_decay: float = 0.01
+    pointer_loss_scope: str = "all"
 
     def __post_init__(self) -> None:
         values = (self.learning_rate, self.evidence_loss_weight, self.gradient_clip)
         if self.epochs < 1 or any(not isfinite(value) or value <= 0 for value in values):
             raise ValueError("control training configuration is invalid")
+        if self.optimizer not in {"adamw", "sgd"}:
+            raise ValueError("control optimizer is invalid")
+        if not isfinite(self.weight_decay) or self.weight_decay < 0:
+            raise ValueError("control weight decay is invalid")
+        if self.pointer_loss_scope not in {"all", "answer"}:
+            raise ValueError("control pointer loss scope is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +70,13 @@ def train_control_head(
     torch.use_deterministic_algorithms(True)
     device = torch.device(config.device)
     head.to(device).train()
-    optimizer = torch.optim.AdamW(head.parameters(), lr=config.learning_rate)
+    optimizer = (
+        torch.optim.AdamW(
+            head.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
+        )
+        if config.optimizer == "adamw"
+        else torch.optim.SGD(head.parameters(), lr=config.learning_rate)
+    )
     before = canonical_json(backbone.identity)
     state_before = backbone.state_fingerprint()
     losses: list[float] = []
@@ -78,14 +93,22 @@ def train_control_head(
         if deadline is not None and time.perf_counter() >= deadline:
             raise TimeoutError("governed training wall-time budget exceeded")
         optimizer.zero_grad(set_to_none=True)
-        logits = head(batch.context, batch.evidence, batch.evidence_mask)
+        logits = head(
+            batch.context,
+            batch.evidence,
+            batch.evidence_mask,
+            batch.evidence_scores,
+        )
         action_loss = nn.functional.cross_entropy(logits.action_logits, batch.action_targets)
         finite = logits.evidence_logits.masked_fill(~batch.evidence_mask, 0)
+        pointer_rows = batch.evidence_mask
+        if config.pointer_loss_scope == "answer":
+            pointer_rows = pointer_rows & (batch.action_targets == 0).unsqueeze(-1)
         pointer_loss = (
             nn.functional.binary_cross_entropy_with_logits(
-                finite[batch.evidence_mask], batch.pointer_targets[batch.evidence_mask]
+                finite[pointer_rows], batch.pointer_targets[pointer_rows]
             )
-            if batch.evidence_mask.any()
+            if pointer_rows.any()
             else torch.zeros((), device=device)
         )
         loss = action_loss + config.evidence_loss_weight * pointer_loss

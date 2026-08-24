@@ -22,6 +22,9 @@
     "evidence_loss_weight": 1.0,
     "epochs": 80,
     "gradient_clip": 1.0,
-    "learning_rate": 0.03
+    "learning_rate": 0.03,
+    "optimizer": "adamw",
+    "pointer_loss_scope": "all",
+    "weight_decay": 0.01
   }
 }

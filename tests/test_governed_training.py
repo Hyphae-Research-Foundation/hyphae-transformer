@@ -183,3 +183,24 @@ def test_materialized_batch_matches_direct_batch() -> None:
     )
     for field in direct.__slots__:
         torch.testing.assert_close(getattr(direct, field), getattr(chunked, field))
+
+
+def test_score_aware_head_can_separate_pointer_targets() -> None:
+    head = GovernedControlHead(
+        4,
+        normalized_features=True,
+        use_evidence_scores=True,
+    )
+    assert head.evidence_score is not None
+    with torch.no_grad():
+        head.context.weight.zero_()
+        head.evidence.weight.zero_()
+        head.evidence_score.weight.fill_(20)
+        head.evidence_score.bias.fill_(-14)
+    logits = head(
+        torch.ones((1, 4)),
+        torch.ones((1, 2, 4)),
+        torch.ones((1, 2), dtype=torch.bool),
+        torch.tensor([[0.95, 0.4]]),
+    )
+    assert (torch.sigmoid(logits.evidence_logits) >= 0.5).tolist() == [[True, False]]

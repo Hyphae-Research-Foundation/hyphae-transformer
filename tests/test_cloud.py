@@ -286,6 +286,23 @@ def test_gemma_training_plan_is_strict_and_retrieves_archive(tmp_path: Path) -> 
     assert "--feature-batch-size 8" in campaign
 
 
+def test_gemma_v2_training_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_v2_training_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "train_gemma4_e4b_control.py" in command[-1]
+    )
+    assert "gemma4_e4b_governed_control_v2.json" in campaign
+    assert "--epochs 200" in campaign
+    assert "--minimum-confidence 0.5" in campaign
+
+
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:
     values = {
         field: getattr(plan(tmp_path), field)
@@ -360,6 +377,48 @@ def gemma_training_plan(tmp_path: Path) -> CloudCampaignPlan:
             "1.0",
             "--feature-batch-size",
             "8",
+        ),
+        artifact_directory=tmp_path / "artifacts",
+        hourly_rate_usd=4.5,
+        max_lifetime_seconds=28_800,
+        max_cost_usd=36,
+        accelerator="amd-rocm",
+    )
+
+
+def gemma_v2_training_plan(tmp_path: Path) -> CloudCampaignPlan:
+    return CloudCampaignPlan(
+        name="hyphae-e4b-control-train-v2-x1",
+        region="mem1",
+        size="gpu-mi355x1-288gb-spot",
+        image="amddevelopercloud-pytorch2100rocm724",
+        ssh_key_id="1",
+        ssh_private_key=tmp_path / "key",
+        repository_url=(
+            "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git"
+        ),
+        revision="0123456789abcdef0123456789abcdef01234567",
+        data_command=("prepare-gemma4-e4b",),
+        campaign_command=(
+            "train-gemma4-e4b-v2",
+            "--seeds",
+            "17",
+            "29",
+            "43",
+            "--epochs",
+            "200",
+            "--learning-rate",
+            "0.05",
+            "--evidence-loss-weight",
+            "2.0",
+            "--gradient-clip",
+            "1.0",
+            "--feature-batch-size",
+            "8",
+            "--pointer-threshold",
+            "0.5",
+            "--minimum-confidence",
+            "0.5",
         ),
         artifact_directory=tmp_path / "artifacts",
         hourly_rate_usd=4.5,

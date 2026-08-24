@@ -46,6 +46,8 @@ def main() -> int:
     parser.add_argument("--evidence-loss-weight", type=float, required=True)
     parser.add_argument("--gradient-clip", type=float, required=True)
     parser.add_argument("--feature-batch-size", type=int, required=True)
+    parser.add_argument("--pointer-threshold", type=float, default=0.5)
+    parser.add_argument("--minimum-confidence", type=float, default=0.7)
     arguments = parser.parse_args()
     report = run_campaign(
         model=arguments.model,
@@ -58,6 +60,8 @@ def main() -> int:
         evidence_loss_weight=arguments.evidence_loss_weight,
         gradient_clip=arguments.gradient_clip,
         feature_batch_size=arguments.feature_batch_size,
+        pointer_threshold=arguments.pointer_threshold,
+        minimum_confidence=arguments.minimum_confidence,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["passed"] else 1
@@ -75,9 +79,14 @@ def run_campaign(
     evidence_loss_weight: float,
     gradient_clip: float,
     feature_batch_size: int,
+    pointer_threshold: float,
+    minimum_confidence: float,
 ) -> dict[str, object]:
     preregistration = json.loads(preregistration_path.read_text())
-    if preregistration.get("schema") != EXPECTED_PREREGISTRATION_SCHEMA:
+    if preregistration.get("schema") not in {
+        EXPECTED_PREREGISTRATION_SCHEMA,
+        "hyphae-transformer.gemma4-e4b-governed-control-preregistration/v2",
+    }:
         raise ValueError("Gemma preregistration schema is invalid")
     training = preregistration["training"]
     expected = {
@@ -91,6 +100,13 @@ def run_campaign(
         raise ValueError("Gemma training settings differ from preregistration")
     if feature_batch_size != max(training["batch_size_smoke"]):
         raise ValueError("feature batch size was not validated by the smoke")
+    recipe = str(preregistration["schema"]).rsplit("/", 1)[-1]
+    v2 = recipe == "v2"
+    if v2 and (
+        training.get("pointer_threshold") != pointer_threshold
+        or training.get("minimum_confidence") != minimum_confidence
+    ):
+        raise ValueError("Gemma decode settings differ from preregistration")
     gates = preregistration["gates"]
     if set(gates) != {
         "action_accuracy",
@@ -140,7 +156,12 @@ def run_campaign(
     seed_reports = []
     for seed in seeds:
         torch.manual_seed(seed)
-        head = GovernedControlHead(backbone.hidden_size).to(device)
+        head = GovernedControlHead(
+            backbone.hidden_size,
+            pointer_rank=int(training.get("pointer_rank", 32)),
+            normalized_features=bool(training.get("normalized_features", False)),
+            use_evidence_scores=bool(training.get("use_evidence_scores", False)),
+        ).to(device)
         config = ControlTrainConfig(
             epochs=epochs,
             learning_rate=learning_rate,
@@ -148,6 +169,9 @@ def run_campaign(
             gradient_clip=gradient_clip,
             seed=seed,
             device=str(device),
+            optimizer=str(training.get("optimizer", "adamw")),
+            weight_decay=float(training.get("weight_decay", 0.01)),
+            pointer_loss_scope=str(training.get("pointer_loss_scope", "all")),
         )
         checkpoint = output / f"seed-{seed}" / "control-head.pt"
         started = time.perf_counter()
@@ -167,6 +191,8 @@ def run_campaign(
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             gates=gates,
             batch=batches["test"],
+            minimum_confidence=minimum_confidence,
+            pointer_threshold=pointer_threshold,
         )
         adversarial = evaluate_control_head(
             backbone,
@@ -175,6 +201,8 @@ def run_campaign(
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             gates=gates,
             batch=batches["adversarial"],
+            minimum_confidence=minimum_confidence,
+            pointer_threshold=pointer_threshold,
         )
         seed_report = {
             "seed": seed,
@@ -200,6 +228,7 @@ def run_campaign(
             preregistration_path.read_bytes()
         ).hexdigest(),
         "feature_batch_size": feature_batch_size,
+        "recipe": recipe,
         "feature_materialization_seconds": feature_seconds,
         "backbone_unchanged": backbone_unchanged,
         "peak_vram_bytes": torch.cuda.max_memory_allocated(device),
