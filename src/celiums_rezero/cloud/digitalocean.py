@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 CLEANUP_RESERVE_SECONDS = 300
+ROCM_PYTORCH_IMAGE = "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1"
 
 
 class CommandRunner(Protocol):
@@ -358,55 +359,13 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
         f"mkdir -p {shlex.quote(plan.remote_data_root)} {shlex.quote(plan.remote_run_root)}",
     )
     if plan.accelerator == "amd-rocm":
-        environment = "/opt/hyphae-rocm-venv"
-        model_root = f"{plan.remote_data_root}/gemma4-e4b"
-        rocm_python = (
-            "$(for candidate in /opt/venv/bin/python /opt/pytorch/bin/python "
-            "/opt/conda/bin/python /usr/local/bin/python3 /usr/bin/python3; do "
-            'if [ -x "$candidate" ] && "$candidate" -c '
-            "'import torch; assert torch.version.hip' >/dev/null 2>&1; then "
-            'printf %s "$candidate"; break; fi; done)'
-        )
+        container = _rocm_container_command(plan)
         return " && ".join(
             (
                 *common,
                 "rocm-smi --showproductname --showmeminfo vram --showdriverversion",
-                f"ROCM_PYTHON={rocm_python}",
-                'test -n "$ROCM_PYTHON"',
-                (
-                    '"$ROCM_PYTHON" -c "import torch; assert torch.version.hip; '
-                    "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
-                    "assert 'MI355' in torch.cuda.get_device_name(0)\""
-                ),
-                (
-                    f"/root/.local/bin/uv venv --python \"$ROCM_PYTHON\" "
-                    f"--system-site-packages {environment}"
-                ),
-                (
-                    f"/root/.local/bin/uv pip install --python {environment}/bin/python "
-                    "transformers==5.14.1"
-                ),
-                (
-                    f"/root/.local/bin/uv pip install --python {environment}/bin/python "
-                    f"--no-deps -e {shlex.quote(plan.remote_root)}"
-                ),
-                shlex.join(
-                    [
-                        f"{environment}/bin/python",
-                        f"{plan.remote_root}/scripts/download_gemma4_e4b.py",
-                        "--out",
-                        model_root,
-                    ]
-                ),
-                shlex.join(
-                    [
-                        f"{environment}/bin/python",
-                        f"{plan.remote_root}/scripts/preflight_gemma4_e4b.py",
-                        "--model",
-                        model_root,
-                        "--require-gpu",
-                    ]
-                ),
+                f"docker pull {shlex.quote(ROCM_PYTORCH_IMAGE)}",
+                f"{container} /bin/bash -lc {shlex.quote(_rocm_bootstrap_inner())}",
             )
         )
     return " && ".join(
@@ -433,23 +392,23 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
     if plan.campaign_command[0] == "smoke-gemma4-e4b":
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         command = [
-            "/opt/hyphae-rocm-venv/bin/python",
-            f"{plan.remote_root}/scripts/smoke_gemma4_e4b.py",
+            "python",
+            "/workspace/scripts/smoke_gemma4_e4b.py",
             "--model",
-            f"{plan.remote_data_root}/gemma4-e4b",
+            "/data/gemma4-e4b",
             "--dataset",
-            f"{plan.remote_root}/experiments/governed/mars-v2-e4b-v1",
+            "/workspace/experiments/governed/mars-v2-e4b-v1",
             "--out",
-            f"{plan.remote_run_root}/gemma4-e4b-smoke.json",
+            "/runs/gemma4-e4b-smoke.json",
             *plan.campaign_command[1:],
         ]
+        inner = f"cd /workspace && {shlex.join(command)}"
         return " && ".join(
             (
-                f"cd {shlex.quote(plan.remote_root)}",
                 (
                     "timeout --signal=TERM "
                     f"{campaign_seconds}s "
-                    f"{shlex.join(command)}"
+                    f"{_rocm_container_command(plan)} /bin/bash -lc {shlex.quote(inner)}"
                 ),
             )
         )
@@ -495,6 +454,49 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
     if plan.accelerator != "amd-rocm":
         raise ValueError("only AMD campaigns declare one exact evidence artifact")
     return "gemma4-e4b-smoke.json"
+
+
+def _rocm_container_command(plan: CloudCampaignPlan) -> str:
+    return shlex.join(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--device=/dev/kfd",
+            "--device=/dev/dri",
+            "--group-add",
+            "video",
+            "--ipc=host",
+            "--shm-size",
+            "16G",
+            "-v",
+            f"{plan.remote_root}:/workspace",
+            "-v",
+            f"{plan.remote_data_root}:/data",
+            "-v",
+            f"{plan.remote_run_root}:/runs",
+            ROCM_PYTORCH_IMAGE,
+        ]
+    )
+
+
+def _rocm_bootstrap_inner() -> str:
+    return " && ".join(
+        (
+            (
+                "python -c \"import torch; assert torch.version.hip; "
+                "assert torch.cuda.is_available(); assert torch.cuda.device_count() == 1; "
+                "assert 'MI355' in torch.cuda.get_device_name(0)\""
+            ),
+            "python -m pip install transformers==5.14.1",
+            "python -m pip install --no-deps -e /workspace",
+            "python /workspace/scripts/download_gemma4_e4b.py --out /data/gemma4-e4b",
+            (
+                "python /workspace/scripts/preflight_gemma4_e4b.py "
+                "--model /data/gemma4-e4b --require-gpu"
+            ),
+        )
+    )
 
 
 def _write_retrieved_evidence(
