@@ -51,6 +51,9 @@ def parse_args() -> argparse.Namespace:
         help="SHA-256 identity bound to the persistent Hyphae directory lineage",
     )
     parser.add_argument("--tenant", default="tenant_conformance")
+    parser.add_argument("--expected-sdk-version", default="2.1.0")
+    parser.add_argument("--expected-runtime-version", default="2.1.0")
+    parser.add_argument("--score-scale", type=float, default=1.0)
     return parser.parse_args()
 
 
@@ -64,7 +67,12 @@ def main() -> int:
     if not key:
         raise SystemExit("Hyphae API key file is empty")
 
+    import hyphae_sdk
     from hyphae_sdk.v2 import HyphaeClient
+    from hyphae_sdk.v2.protocol import PROTOCOL_MAJOR, PROTOCOL_MINOR
+
+    if hyphae_sdk.__version__ != arguments.expected_sdk_version:
+        raise RuntimeError("Hyphae SDK version differs from certification pin")
 
     tenant = TenantId(arguments.tenant)
     backend_id = arguments.backend_id
@@ -110,6 +118,9 @@ def main() -> int:
     assert pending.job_id is not None
     receipts = PublicationReceiptStore(arguments.receipts)
     with HyphaeClient.local_authenticated(str(arguments.endpoint), key) as client:
+        capabilities = client.capabilities()
+        if capabilities.kind != "capabilities":
+            raise RuntimeError("Hyphae capability response is invalid")
         ingestor = HyphaeShadowIngestor(
             tenant=tenant,
             client=client,
@@ -147,8 +158,10 @@ def main() -> int:
             config=RetrievalConfig(
                 collection=arguments.collection,
                 corpus_generation="generation-conformance-v1",
+                backend_id=backend_id,
                 vector_target="semantic",
-                score_scale=1.0,
+                score_scale=arguments.score_scale,
+                require_exact_vector_receipt=True,
             ),
             embedder=FixtureEmbedder(),
         )
@@ -163,6 +176,10 @@ def main() -> int:
                 "status": "passed",
                 "tenant": tenant.value,
                 "collection": arguments.collection,
+                "sdk_version": hyphae_sdk.__version__,
+                "expected_runtime_version": arguments.expected_runtime_version,
+                "protocol": {"major": PROTOCOL_MAJOR, "minor": PROTOCOL_MINOR},
+                "capabilities": _json_value(capabilities.value),
                 "ingest_receipt": _json_value(asdict(outcome.receipt)),
                 "snapshot_fingerprint": evidence.snapshot_fingerprint,
                 "evidence_handles": [hit.handle for hit in evidence.hits],

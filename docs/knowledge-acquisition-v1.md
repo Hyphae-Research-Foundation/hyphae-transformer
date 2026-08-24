@@ -246,7 +246,7 @@ thresholds, and metrics export remain deployment concerns.
 
 ## Isolated Hyphae Conformance
 
-Run `scripts/hyphae_knowledge_conformance.py` with the Hyphae 1.2.2 Python SDK on
+Run `scripts/hyphae_knowledge_conformance.py` with the exact Hyphae 2.1.0 Python SDK on
 `PYTHONPATH` and an already provisioned, tenant-isolated native endpoint:
 
 ```text
@@ -255,7 +255,9 @@ PYTHONPATH=/path/to/hyphae/sdks/python/src:src \
   --endpoint /tmp/tenant-a/hyphae.sock \
   --api-key-file /tmp/tenant-a/owner.key \
   --collection 13 --receipts /tmp/tenant-a/receipts \
-  --backend-id <sha256-of-persistent-hyphae-directory-lineage>
+  --backend-id <sha256-of-persistent-hyphae-directory-lineage> \
+  --expected-sdk-version 2.1.0 --expected-runtime-version 2.1.0 \
+  --score-scale 0.03278688524590164
 ```
 
 The collection must declare the `body`, `source_id`, `source_version`,
@@ -267,6 +269,15 @@ hydrated body digest. The endpoint and receipt directory must both be dedicated 
 same tenant; the script never initializes or mutates another tenant's data directory.
 `--backend-id` must be derived from the persistent Hyphae directory lineage, not its
 socket path, so recreating a backend cannot inherit local replay authority.
+The 2.1.0 certification must additionally retain exact tagged binary and wheel
+digests, negotiated protocol identity, capability response, strict receipt, daemon
+restart replay, exact `vector_branches` strategy evidence, raw score distribution, and
+backend-lineage equality during retrieval. Synthetic and model-only shadow evidence does
+not substitute for native-runtime certification.
+The certified single-document weighted-RRF maximum is `2 / 61 =
+0.03278688524590164`; production `RetrievalConfig` instances targeting the same
+one-lexical/one-vector weight-1 fusion must pin that scale. A different branch count,
+branch weight, fusion method, or Hyphae release requires a new score calibration gate.
 
 ## Production Runtime Boundary
 
