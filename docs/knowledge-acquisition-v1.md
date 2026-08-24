@@ -300,6 +300,15 @@ different command under the same identity fails permanently. This proves exactly
 acceptance into the local mailbox, not exactly-once observation by an external webhook,
 email, or messaging provider.
 
+The approved English semantic embedding profile is
+`sentence-transformers/all-MiniLM-L6-v2` at revision
+`1110a243fdf4706b3f48f1d95db1a4f5529b4d41`. The local provider verifies the complete
+artifact manifest, loads only `BertModel`/`BertTokenizerFast` with remote code disabled,
+mean-pools attention-masked tokens, L2-normalizes float32 output, and requires exactly
+384 dimensions. Ingest and query use the same `EmbeddingProvider` contract and reject a
+dimension mismatch before contacting Hyphae. Spanish or broader multilingual retrieval
+requires a separately benchmarked and certified profile.
+
 ## Production Runtime Boundary
 
 Schema version 4 adds immutable generation manifests, one active routing pointer,

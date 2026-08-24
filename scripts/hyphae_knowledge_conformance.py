@@ -57,6 +57,7 @@ from celiums_rezero.knowledge.schemas import (
 
 class FixtureEmbedder:
     profile = "hyphae-conformance-v1"
+    dimensions = 2
 
     def embed(self, text: str) -> tuple[float, ...]:
         digest = hashlib.sha256(text.encode()).digest()

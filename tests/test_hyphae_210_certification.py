@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 
@@ -11,6 +12,13 @@ module = importlib.util.module_from_spec(
 )
 assert spec.loader is not None
 spec.loader.exec_module(module)
+collection_module = importlib.util.module_from_spec(
+    collection_spec := importlib.util.spec_from_file_location(
+        "hyphae_210_collection", ROOT / "scripts" / "hyphae_210_collection.py"
+    )
+)
+assert collection_spec.loader is not None
+collection_spec.loader.exec_module(collection_module)
 
 
 def test_certification_pins_exact_hyphae_tag() -> None:
@@ -31,3 +39,12 @@ def test_certification_runs_generation_routing_canary() -> None:
     assert "DurableFinalizationWorker" in conformance
     assert "SupervisedFrozenGemmaRuntime" in conformance
     assert "SQLiteMailboxNotificationSink" in conformance
+
+
+def test_collection_dimensions_are_explicit_without_changing_certified_bytes() -> None:
+    certified = collection_module.definitions(vector_dimensions=2)[-1]
+    production = collection_module.definitions(vector_dimensions=384)[-1]
+    assert hashlib.sha256(certified).hexdigest() == (
+        "1978cd66255da4d340fd88ac28669bcae1afaea37cb32d43af3b812b0fadea27"
+    )
+    assert certified != production

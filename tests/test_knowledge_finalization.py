@@ -239,6 +239,7 @@ def test_scheduler_isolates_answerer_failure_and_reports_it(tmp_path: Path) -> N
 
     class Embedder:
         profile = "fixture-v1"
+        dimensions = 2
 
         def embed(self, text: str) -> tuple[float, ...]:
             return (len(text) / 100, 0.5)
@@ -328,6 +329,7 @@ def test_scheduler_recovers_expired_pre_outbox_work(tmp_path: Path) -> None:
 
     class Embedder:
         profile = "fixture-v1"
+        dimensions = 2
 
         def embed(self, text: str) -> tuple[float, ...]:
             return (len(text) / 100, 0.5)

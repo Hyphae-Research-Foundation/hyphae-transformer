@@ -13,6 +13,7 @@ from celiums_rezero.governed.runtime import (
     QUOTED_RUNTIME_VERSION,
     quoted_runtime_manifest_sha256,
 )
+from celiums_rezero.knowledge.embedding import EmbeddingProvider
 from celiums_rezero.knowledge.finalization import (
     DurableFinalizationWorker,
     FinalizationPolicy,
@@ -34,7 +35,6 @@ from celiums_rezero.knowledge.orchestration import (
 from celiums_rezero.knowledge.publication import PublicationReceiptStore
 from celiums_rezero.knowledge.retrieval import (
     HYPHAE_210_RETRIEVAL_PROFILE,
-    EmbeddingProvider,
     GenerationRoutedRetriever,
 )
 from celiums_rezero.knowledge.schemas import SufficiencyPolicy, TenantId
@@ -65,6 +65,8 @@ class ProductionFinalizationRuntime:
         )
         if not hasattr(embedder, "embed") or not isinstance(
             getattr(embedder, "profile", None), str
+        ) or isinstance(getattr(embedder, "dimensions", None), bool) or not isinstance(
+            getattr(embedder, "dimensions", None), int
         ):
             raise TypeError("embedder factory returned an invalid provider")
         client_factory = _load_callable(

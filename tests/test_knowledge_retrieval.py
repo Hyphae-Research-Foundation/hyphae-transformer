@@ -68,6 +68,7 @@ class BoundedFakeHyphaeClient(FakeHyphaeClient):
 
 class FakeEmbedder:
     profile = "fixture-embedder-v1"
+    dimensions = 2
 
     def embed(self, text: str) -> tuple[float, ...]:
         assert text

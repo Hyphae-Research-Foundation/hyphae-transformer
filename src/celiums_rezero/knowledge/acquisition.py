@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
 from celiums_rezero.knowledge.coordinator import KnowledgeCoordinator
+from celiums_rezero.knowledge.embedding import EmbeddingProvider, checked_embedding
 from celiums_rezero.knowledge.schemas import (
     AcquisitionJob,
     EmbeddedChunk,
@@ -37,11 +38,7 @@ class SourceConnector(Protocol):
     def acquire(self, tenant: TenantId, source_id: str, query: str) -> SourceArtifact: ...
 
 
-class ChunkEmbedder(Protocol):
-    @property
-    def profile(self) -> str: ...
-
-    def embed(self, text: str) -> tuple[float, ...]: ...
+ChunkEmbedder = EmbeddingProvider
 
 
 class KnowledgeIngestor(Protocol):
@@ -215,7 +212,11 @@ class AcquisitionWorker:
             chunks = chunk_validated_artifact(validated, self.chunking)
             self.coordinator.store.transition(tenant, job_id, JobStatus.EMBEDDING)
             embedded = tuple(
-                EmbeddedChunk(chunk, self.embedder.profile, self.embedder.embed(chunk.text))
+                EmbeddedChunk(
+                    chunk,
+                    self.embedder.profile,
+                    checked_embedding(self.embedder, chunk.text),
+                )
                 for chunk in chunks
             )
             self.coordinator.store.transition(tenant, job_id, JobStatus.INGESTING)
@@ -465,7 +466,11 @@ class DurableAcquisitionWorker(AcquisitionWorker):
         chunks = chunk_validated_artifact(validated, self.chunking)
         store.transition_leased(lease, JobStatus.EMBEDDING)
         embedded = tuple(
-            EmbeddedChunk(chunk, self.embedder.profile, self.embedder.embed(chunk.text))
+            EmbeddedChunk(
+                chunk,
+                self.embedder.profile,
+                checked_embedding(self.embedder, chunk.text),
+            )
             for chunk in chunks
         )
         key = ingest_idempotency_key(job, embedded, self.embedder.profile, target=target)

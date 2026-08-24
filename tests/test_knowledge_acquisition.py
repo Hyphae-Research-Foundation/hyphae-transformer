@@ -25,6 +25,7 @@ from celiums_rezero.knowledge.schemas import SourceArtifact, SourcePolicy
 
 class DeterministicEmbedder:
     profile = "fixture-embedder-v1"
+    dimensions = 4
 
     def embed(self, text: str) -> tuple[float, ...]:
         digest = hashlib.sha256(text.encode()).digest()

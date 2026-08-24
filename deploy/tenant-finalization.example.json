@@ -1,8 +1,10 @@
 {
   "adapter": "celiums_rezero.knowledge.production_runtime:factory",
   "adapter_config": {
-    "embedder_config": {},
-    "embedder_factory": "approved_tenant_providers:embedder_factory",
+    "embedder_config": {
+      "model_path": "/opt/hyphae/embeddings/all-MiniLM-L6-v2-1110a243"
+    },
+    "embedder_factory": "celiums_rezero.knowledge.embedding:minilm_l6_v2_factory",
     "finalization": {
       "answer_timeout_seconds": 60,
       "lease_safety_seconds": 5,

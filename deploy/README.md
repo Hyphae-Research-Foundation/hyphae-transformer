@@ -23,6 +23,10 @@ verbatim quotations. It does not authorize unconstrained natural-language genera
 The systemd template exposes only `/dev/kfd` and `/dev/dri` for the qualified ROCm
 runtime. CPU-only tenants should remove those `DeviceAllow` entries; NVIDIA deployments
 require a separately reviewed device allowlist rather than broad `PrivateDevices=no`.
+The shipped MiniLM embedding provider is English-only, CPU float32, and 384-dimensional.
+It must be provisioned from the exact revision and artifact manifest into the absolute
+root-owned path configured in `tenant-finalization.example.json`; do not reuse a legacy
+two-dimensional Hyphae collection. Re-embedding requires a new collection and generation.
 
 The provided systemd template runs one bounded attempt through the shipped
 `hyphae-knowledge` command. The legacy `celiums-knowledge` alias remains available

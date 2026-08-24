@@ -9,6 +9,7 @@ from math import isfinite
 from typing import Any, Protocol
 
 from celiums_rezero.knowledge.coordinator import normalize_query
+from celiums_rezero.knowledge.embedding import EmbeddingProvider, checked_embedding
 from celiums_rezero.knowledge.generation import GenerationAuthority
 from celiums_rezero.knowledge.schemas import EvidenceBundle, EvidenceHit, TenantId
 from celiums_rezero.lab.serialization import canonical_json, content_hash
@@ -28,15 +29,6 @@ class HyphaeSearchClient(Protocol):
         *,
         options: object | None = None,
     ) -> object: ...
-
-
-class EmbeddingProvider(Protocol):
-    """Pinned caller-owned query embedder; Hyphae never runs the model."""
-
-    @property
-    def profile(self) -> str: ...
-
-    def embed(self, text: str) -> tuple[float, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,9 +155,7 @@ class HyphaeRetrievalGateway:
         vectors: list[dict[str, object]] = []
         if self.config.vector_target is not None:
             assert self.embedder is not None
-            values = self.embedder.embed(query)
-            if not values or any(not isfinite(value) for value in values):
-                raise RetrievalContractError("embedding provider returned an invalid vector")
+            values = checked_embedding(self.embedder, query)
             vectors.append(
                 {
                     "target": self.config.vector_target,

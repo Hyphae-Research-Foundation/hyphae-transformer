@@ -26,6 +26,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+embedding = [
+  "safetensors==0.8.0",
+  "tokenizers==0.22.2",
+  "transformers==5.14.1",
+]
 dev = [
   "mypy>=1.15",
   "pytest>=8.3",
