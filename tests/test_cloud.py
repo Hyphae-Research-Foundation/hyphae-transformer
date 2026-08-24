@@ -227,6 +227,7 @@ def test_gemma_rocm_bootstrap_uses_pinned_amd_container(tmp_path: Path) -> None:
     assert "--device=/dev/kfd" in bootstrap
     assert "/workspace/scripts/download_gemma4_e4b.py" in bootstrap
     assert "assert torch.version.hip" in bootstrap
+    assert "gcnArchName" in bootstrap
 
 
 def test_cloud_plan_requires_full_commit_sha(tmp_path: Path) -> None:

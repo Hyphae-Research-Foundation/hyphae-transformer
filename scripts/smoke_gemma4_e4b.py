@@ -35,7 +35,9 @@ def main() -> int:
         raise ValueError("smoke settings differ from the preregistration")
     if not torch.cuda.is_available() or torch.version.hip is None:
         raise RuntimeError("the Gemma E4B smoke requires a ROCm GPU")
-    if torch.cuda.device_count() != 1 or "MI355" not in torch.cuda.get_device_name(0):
+    if torch.cuda.device_count() != 1 or "gfx950" not in getattr(
+        torch.cuda.get_device_properties(0), "gcnArchName", ""
+    ):
         raise RuntimeError("the Gemma E4B smoke requires one AMD MI355X")
 
     dataset = _load_dataset(arguments.dataset)
@@ -97,6 +99,7 @@ def main() -> int:
         "model_revision": backbone.revision,
         "dataset_id": dataset.manifest.dataset_id,
         "gpu": torch.cuda.get_device_name(0),
+        "gpu_architecture": torch.cuda.get_device_properties(0).gcnArchName,
         "hip": torch.version.hip,
         "torch": torch.__version__,
         "batch_results": results,
