@@ -119,3 +119,7 @@ the learned ReZero path remains a residual correction. These values are computed
 the ordinary request and root-owned policy, not from shadow labels. The prospective
 protocol is
 [`experiments/canonical/gemma4_e4b_rezero_sequence_control_v2.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v2.json).
+
+The v2 search selected learning rate `0.0003`; every validation, test, and adversarial
+run passed with zero unsafe answers and an unchanged Gemma fingerprint. This authorizes
+only a repeat of the unchanged external shadow using the new content-addressed bundle.

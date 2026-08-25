@@ -1,0 +1,43 @@
+{
+  "analysis": {
+    "backbone_unchanged": true,
+    "host_control_contract": "host-policy-certificate-v2",
+    "parameters": 2919224,
+    "passed": true,
+    "report_id": "rzsc_455c9ff78bfa2e5ff8e5f49adef101e44cc07e2e7f68c30eaa6849b314161140",
+    "selected_learning_rate": 0.0003,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "archive_sha256": "f3555066cdc373f16fe8ace8d0bb19768ee11f61e4832780bed492b93356ccde",
+    "cloud_execution_sha256": "2bd627afdad90dab3cde44645f3b6e0e57b54876185765e0c4c4e32b7aa229cc",
+    "report_sha256": "d022209e12c391b293c61c7cb794569c620ca09aa1f453889eb0ba84a2f16c7f"
+  },
+  "bundle_candidate": {
+    "bundle_id": "rzcb_9d506a053936aeb4b5f2de3380304fe96c6cc090eba295000341b9cfd8873015",
+    "bundle_sha256": "5ea905ede3ec42bb756714885aca42567655dbb4c4ebdd38029d11345872ca3c",
+    "seed": 17
+  },
+  "campaign": {
+    "completed": true,
+    "created_at": "2026-08-25T13:32:48.594108+00:00",
+    "deleted_at": "2026-08-25T13:40:29.092366+00:00",
+    "droplet_id": 595040547,
+    "estimated_cost_usd": 0.5756228225000001,
+    "lifetime_seconds": 460.498258,
+    "resources_remaining": 0,
+    "source_revision": "d2ece9b00a7148ab8205fd2bc03c9fc2d42978e1"
+  },
+  "checkpoints": {
+    "seed_17_sha256": "0c705ffde37724ada381857f01c8f194edf1257671296d646b21593c3e2e7195",
+    "seed_29_sha256": "01c94ae04eab4e4f2a280f557e24c3b27bfac19410080ee8abe422a1dd156b3d",
+    "seed_43_sha256": "8ce11a925c155d8d0e959c6cdb0703b0bd8c83d62ec255e732a836db81d92fbe"
+  },
+  "final": [
+    {"seed": 17, "test_exact_match": 0.9954544901847839, "adversarial_exact_match": 0.9818181395530701, "unsafe_answer_rate": 0.0},
+    {"seed": 29, "test_exact_match": 0.9909090399742126, "adversarial_exact_match": 0.9909090399742126, "unsafe_answer_rate": 0.0},
+    {"seed": 43, "test_exact_match": 0.9909090399742126, "adversarial_exact_match": 0.9909090399742126, "unsafe_answer_rate": 0.0}
+  ],
+  "preregistration_sha256": "392f51be8b55a7763686b5cecbd9c22225c17880398ca77df4408a2f14e8cb56",
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-sequence-control-result/v2"
+}
