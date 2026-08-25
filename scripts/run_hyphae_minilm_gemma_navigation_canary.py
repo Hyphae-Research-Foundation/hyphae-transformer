@@ -188,6 +188,11 @@ def main() -> int:
 
 def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Popen[str] | None]:
     failure_reasons: list[str] = []
+    import sys as _sys
+
+    def note(message: str) -> None:
+        print(f"[navigation-canary] {message}", file=_sys.stderr, flush=True)
+
     if arguments.work_root.exists() or not arguments.work_root.is_absolute():
         raise ValueError("navigation work root must be a new absolute path")
     arguments.work_root.mkdir(mode=0o700)
@@ -387,6 +392,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             "backend_id": hashlib.sha256(lineage).hexdigest(),
         }
 
+    note("provisioning distractor backend")
     first = backend("native", "navigation-canary-v1")
     daemon = first["daemon"]
     with first["raw_client"] as raw_client:
@@ -461,9 +467,11 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
                 deadline_micros=time.time_ns() // 1000 + int(timeout * 1_000_000)
             ),
         )
+        note("retrieving distractor evidence")
         distractor_evidence = router.retrieve(TENANT, QUERY, timeout_seconds=30)
         if not distractor_evidence.hits:
             raise RuntimeError("navigation distractor retrieval returned no evidence")
+        note("deciding step0")
         step0_decision = decide_navigation_step(
             backbone=backbone,
             pilot=pilot,
@@ -491,6 +499,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         )
     _stop_daemon(first["daemon"], first["socket_path"])
     daemon = None
+    note("provisioning body backend")
     second = backend("native2", "navigation-canary-v1-body")
     daemon = second["daemon"]
     with second["raw_client"] as raw_client2:
@@ -625,6 +634,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         if not evidence.hits or evidence.hits[0].text != BODY.decode():
             raise RuntimeError("navigation retrieval did not hydrate the expected passage")
         live_certificate = _certificate(evidence, policy)
+        note("deciding step1")
         live_decision = decide_navigation_step(
             backbone=backbone,
             pilot=pilot,
@@ -666,6 +676,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             and live_decision.action == "answer"
             and tuple(live_decision.selected_handles) == tuple(hit.handle for hit in evidence.hits)
         )
+        note("composing report")
         report = {
             "schema": REPORT_SCHEMA,
             "completed": True,
