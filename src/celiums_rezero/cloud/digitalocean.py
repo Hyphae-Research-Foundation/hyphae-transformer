@@ -121,6 +121,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-rezero-v2",
             "train-gemma4-e4b-rezero-v3",
             "train-gemma4-e4b-rezero-v4",
+            "train-gemma4-e4b-rezero-navigation-v1",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "shadow-gemma4-e4b-rezero-v1",
@@ -145,6 +146,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-rezero-v2",
                 "train-gemma4-e4b-rezero-v3",
                 "train-gemma4-e4b-rezero-v4",
+                "train-gemma4-e4b-rezero-navigation-v1",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "shadow-gemma4-e4b-rezero-v1",
@@ -185,6 +187,11 @@ class CloudCampaignPlan:
             _validate_gemma_rezero_v3_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-rezero-v4":
             _validate_gemma_rezero_v4_training_command(self.campaign_command)
+        if (
+            self.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+            and self.campaign_command != ("train-gemma4-e4b-rezero-navigation-v1",)
+        ):
+            raise ValueError("ReZero navigation command differs from preregistration")
         if self.campaign_command[0] == "shadow-gemma4-e4b-v1":
             _validate_gemma_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v2":
@@ -554,6 +561,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-rezero-v2",
         "train-gemma4-e4b-rezero-v3",
         "train-gemma4-e4b-rezero-v4",
+        "train-gemma4-e4b-rezero-navigation-v1",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "shadow-gemma4-e4b-rezero-v1",
@@ -631,6 +639,23 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 (
                     "/workspace/experiments/canonical/"
                     f"gemma4_e4b_governed_control_{version}.json"
+                ),
+                "--out",
+                "/runs",
+                *plan.campaign_command[1:],
+            ]
+        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1":
+            command = [
+                "python",
+                "/workspace/scripts/train_gemma4_e4b_navigation.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--dataset",
+                "/workspace/experiments/governed/mars-v2-e4b-v1",
+                "--preregistration",
+                (
+                    "/workspace/experiments/canonical/"
+                    "gemma4_e4b_rezero_navigation_v1.json"
                 ),
                 "--out",
                 "/runs",
@@ -1045,7 +1070,9 @@ def _write_retrieved_evidence(
         if plan.campaign_command[0].startswith("train-gemma4-e4b"):
             with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
                 report_name = (
-                    "./rezero-sequence-report.json"
+                    "./rezero-navigation-report.json"
+                    if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+                    else "./rezero-sequence-report.json"
                     if plan.campaign_command[0].startswith("train-gemma4-e4b-rezero-")
                     else "./training-report.json"
                 )
@@ -1099,7 +1126,9 @@ def _write_retrieved_evidence(
     (plan.artifact_directory / _expected_artifact_name(plan)).write_bytes(payload)
     if plan.campaign_command[0].startswith("train-gemma4-e4b"):
         report_name = (
-            "rezero-sequence-report.json"
+            "rezero-navigation-report.json"
+            if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+            else "rezero-sequence-report.json"
             if plan.campaign_command[0].startswith("train-gemma4-e4b-rezero-")
             else "training-report.json"
         )
