@@ -165,6 +165,7 @@ def main() -> int:
 
 
 def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Popen[str] | None]:
+    failure_reasons: list[str] = []
     if arguments.work_root.exists() or not arguments.work_root.is_absolute():
         raise ValueError("navigation work root must be a new absolute path")
     arguments.work_root.mkdir(mode=0o700)
@@ -437,7 +438,9 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             present_evidence=False,
         )
         if step0_decision.action != "search":
-            raise RuntimeError("navigation pilot did not request the required search")
+            failure_reasons.append("step0 action is not search")
+        if step0_decision.selected_handles:
+            failure_reasons.append("step0 selected handles despite search contract")
         body_pending = coordinator.answer_or_enqueue(
             tenant=TENANT,
             query=QUERY,
@@ -556,6 +559,10 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
                 "action_logits": list(live_decision.action_logits),
             },
         ]
+        if live_decision.action != "answer":
+            failure_reasons.append("live action is not answer")
+        if tuple(live_decision.selected_handles) != tuple(hit.handle for hit in evidence.hits):
+            failure_reasons.append("live selected handles differ from retrieval")
         passed = (
             step0_decision.action == "search"
             and not step0_decision.selected_handles
@@ -566,7 +573,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             "schema": "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1",
             "completed": True,
             "passed": passed,
-            "failure": None,
+            "failure": None if passed else "; ".join(failure_reasons),
             "source_revision": arguments.source_revision,
             "source_patch_sha256": arguments.source_patch_sha256,
             "dependencies": {
