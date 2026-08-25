@@ -93,3 +93,19 @@ The content-addressed result is recorded in
 [`experiments/results/gemma4_e4b_rezero_sequence_control_v1.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v1.json).
 This promotes the ReZero controller to deterministic packaging and external shadow
 evaluation. It still does not authorize Gemma fine-tuning or multi-step navigation.
+
+## ReZero External Shadow Result
+
+The selected seed-17 controller was packaged deterministically as bundle
+`rzcb_25c0219bd57b00231f046cc75667314175a58c60ade89b4c5fc103bcd92469c6`
+and evaluated on the unchanged corrected non-MARS cases. The shadow completed but
+failed its preregistered gates. Action match was `0.75` and pointer exact match was
+`0.8333`; there were zero unsafe upgrades, but two supported scenarios were downgraded
+to abstention and counted as operational divergences. The previously known low-score
+case also produced one allowed conservative abstention. Latency passed comfortably.
+
+The negative result is preserved in
+[`experiments/results/gemma4_e4b_rezero_shadow_external_v1.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v1.json).
+The candidate is not promoted to a host-affecting runtime or navigation. The next
+experiment must address external supported-case generalization using train and
+validation data only; relaxing the shadow gates after observation is not permitted.

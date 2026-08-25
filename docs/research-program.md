@@ -298,3 +298,10 @@ The preregistered frozen-Gemma search subsequently selected learning rate `0.001
 passed held-out and adversarial gates for all three seeds with zero unsafe answers and
 an unchanged Gemma fingerprint. The result is preserved in
 [`experiments/results/gemma4_e4b_rezero_sequence_control_v1.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v1.json).
+
+The first external shadow did not replicate that result: action match was `0.75`,
+pointer exact match was `0.8333`, and two supported cases were conservatively downgraded
+to abstention. There were no unsafe upgrades. This negative external-validity result is
+preserved in
+[`experiments/results/gemma4_e4b_rezero_shadow_external_v1.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v1.json),
+and blocks runtime promotion.
