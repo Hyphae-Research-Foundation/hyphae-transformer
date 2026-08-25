@@ -365,6 +365,36 @@ def test_gemma_rocm_bootstrap_uses_pinned_amd_container(tmp_path: Path) -> None:
     assert "gcnArchName" in bootstrap
 
 
+def test_cloud_bootstrap_fetches_exact_pinned_revision(tmp_path: Path) -> None:
+    runner = FakeRunner()
+    cloud_plan = gemma_plan(tmp_path)
+    execute_digitalocean_campaign(cloud_plan, runner=runner, sleep=lambda _: None)
+    bootstrap = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "git clone" in command[-1]
+    )
+    assert "git clone" in bootstrap and "--no-checkout" in bootstrap
+    assert f"fetch --depth 1 origin {cloud_plan.revision}" in bootstrap
+    assert f"checkout {cloud_plan.revision}" in bootstrap
+
+
+def test_cloud_refuses_unfetchable_revision_before_provisioning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cloud_plan = gemma_plan(tmp_path)
+
+    def fail_fetch(*args, **kwargs):
+        command = args[0]
+        if "fetch" in command:
+            raise subprocess.CalledProcessError(128, command, stderr="not our ref")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(digitalocean.subprocess, "run", fail_fetch)
+    with pytest.raises(ValueError, match="not fetchable"):
+        execute_digitalocean_campaign(cloud_plan)
+
+
 def test_gemma_rocm_campaign_sets_source_pythonpath(tmp_path: Path) -> None:
     runner = FakeRunner()
     execute_digitalocean_campaign(gemma_plan(tmp_path), runner=runner, sleep=lambda _: None)

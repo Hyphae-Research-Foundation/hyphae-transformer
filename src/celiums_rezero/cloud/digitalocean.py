@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 import tarfile
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -220,6 +221,8 @@ def execute_digitalocean_campaign(
 
     if plan.artifact_directory.exists() and any(plan.artifact_directory.iterdir()):
         raise FileExistsError("cloud artifact directory is not empty")
+    if runner is None:
+        _verify_remote_revision(plan)
     if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
         _validate_hyphae_wheel(plan)
     droplet_id: int | None = None
@@ -455,6 +458,7 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
         [
             "git",
             "clone",
+            "--no-checkout",
             plan.repository_url,
             plan.remote_root,
         ]
@@ -462,6 +466,10 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
     common = (
         f"rm -rf {shlex.quote(plan.remote_root)}",
         checkout,
+        (
+            f"git -C {shlex.quote(plan.remote_root)} fetch --depth 1 origin "
+            f"{shlex.quote(plan.revision)}"
+        ),
         f"git -C {shlex.quote(plan.remote_root)} checkout {shlex.quote(plan.revision)}",
         "curl -LsSf https://astral.sh/uv/install.sh | sh",
         f"mkdir -p {shlex.quote(plan.remote_data_root)} {shlex.quote(plan.remote_run_root)}",
@@ -858,6 +866,39 @@ def _rocm_bootstrap_inner(plan: CloudCampaignPlan) -> str:
             ]
         )
     return " && ".join(commands)
+
+
+def _verify_remote_revision(plan: CloudCampaignPlan) -> None:
+    with tempfile.TemporaryDirectory(prefix="hyphae-revision-") as directory:
+        subprocess.run(
+            ["git", "init", "--bare", "--quiet", directory],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    directory,
+                    "fetch",
+                    "--quiet",
+                    "--depth",
+                    "1",
+                    plan.repository_url,
+                    plan.revision,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.CalledProcessError as error:
+            raise ValueError(
+                "cloud source revision is not fetchable from its repository"
+            ) from error
 
 
 def _write_retrieved_evidence(
