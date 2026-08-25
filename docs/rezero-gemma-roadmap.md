@@ -62,3 +62,14 @@ mistyped and nonexistent merge SHA, so checkout failed before environment setup.
 The executor now verifies locally that the exact revision can be fetched before creating
 a paid resource, and the remote bootstrap fetches that revision explicitly before
 checkout.
+
+The third attempt passed. On one MI355X, frozen Gemma features drove a 2,919,188
+parameter shared-gate ReZero controller through finite forward and backward passes.
+Both residual-gate gradients were finite, gates were excluded from weight decay, the
+Gemma fingerprint remained unchanged, and peak allocated VRAM was 18,002,620,928 bytes
+against the 240 GiB limit. The Droplet was deleted and confirmed absent. The
+content-addressed result is
+[`experiments/results/gemma4_e4b_rezero_smoke_v1.json`](../experiments/results/gemma4_e4b_rezero_smoke_v1.json).
+
+This result satisfies the smoke promotion gate for the preregistered frozen-feature
+training search. It does not report validation, test, or adversarial model quality.
