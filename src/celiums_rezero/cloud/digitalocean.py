@@ -624,6 +624,23 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/runs",
                 *plan.campaign_command[1:],
             ]
+        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1":
+            command = [
+                "python",
+                "/workspace/scripts/train_gemma4_e4b_navigation.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--dataset",
+                "/workspace/experiments/governed/mars-v2-e4b-v1",
+                "--preregistration",
+                (
+                    "/workspace/experiments/canonical/"
+                    "gemma4_e4b_rezero_navigation_v1.json"
+                ),
+                "--out",
+                "/runs",
+                *plan.campaign_command[1:],
+            ]
         elif plan.campaign_command[0].startswith("train-gemma4-e4b"):
             version = plan.campaign_command[0].rsplit("-", 1)[-1]
             if version not in {"v2", "v3"}:
@@ -639,23 +656,6 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 (
                     "/workspace/experiments/canonical/"
                     f"gemma4_e4b_governed_control_{version}.json"
-                ),
-                "--out",
-                "/runs",
-                *plan.campaign_command[1:],
-            ]
-        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1":
-            command = [
-                "python",
-                "/workspace/scripts/train_gemma4_e4b_navigation.py",
-                "--model",
-                "/data/gemma4-e4b",
-                "--dataset",
-                "/workspace/experiments/governed/mars-v2-e4b-v1",
-                "--preregistration",
-                (
-                    "/workspace/experiments/canonical/"
-                    "gemma4_e4b_rezero_navigation_v1.json"
                 ),
                 "--out",
                 "/runs",
