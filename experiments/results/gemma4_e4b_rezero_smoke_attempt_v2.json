@@ -1,0 +1,19 @@
+{
+  "artifacts": {
+    "bootstrap_stderr_sha256": "0290b5fb2c622aed9c78c10280acac6625c642c92b8ba2593604ff5451df30cd",
+    "bootstrap_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cloud_execution_sha256": "492a3f209af5c0904a1b6ec03b7f43ac891f83dca9cf84da43316700d8a5733e"
+  },
+  "attempted_at": "2026-08-25T12:13:17.875474+00:00",
+  "campaign": "gemma4_e4b_rezero_sequence_control_v1_smoke",
+  "deleted_at": "2026-08-25T12:17:01.752192+00:00",
+  "droplet_id": 595024711,
+  "estimated_cost_usd": 0.2798458975,
+  "failure": "The plan contained the nonexistent revision 7fa5e516a50a585b45db0c56fde4bc6bb75f8259 instead of merge commit 7fa5e518798183485aa9bf600f33107e9ac0b45a, so checkout failed before environment setup.",
+  "lifetime_seconds": 223.876718,
+  "observations": 0,
+  "requested_revision": "7fa5e516a50a585b45db0c56fde4bc6bb75f8259",
+  "resources_remaining": 0,
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-smoke-attempt/v1",
+  "status": "invalid_source_revision_failure"
+}

@@ -55,3 +55,10 @@ its content-addressed logs are recorded in
 [`experiments/results/gemma4_e4b_rezero_smoke_attempt_v1.json`](../experiments/results/gemma4_e4b_rezero_smoke_attempt_v1.json).
 The API call is corrected prospectively to use the already active device, matching the
 previously successful Gemma smoke convention.
+
+The second paid attempt also produced no model observation. The plan contained a
+mistyped and nonexistent merge SHA, so checkout failed before environment setup. Its evidence is recorded in
+[`experiments/results/gemma4_e4b_rezero_smoke_attempt_v2.json`](../experiments/results/gemma4_e4b_rezero_smoke_attempt_v2.json).
+The executor now verifies locally that the exact revision can be fetched before creating
+a paid resource, and the remote bootstrap fetches that revision explicitly before
+checkout.
