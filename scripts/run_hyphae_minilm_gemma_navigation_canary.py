@@ -71,7 +71,9 @@ NAVIGATION_BUNDLE_SHA256 = "5cb0381c03f944706819e6c5ce2d9dc71be63c27b88292cfd28f
 NAVIGATION_CHECKPOINT_SHA256 = "47940ec5f690fab92f13601ca6c1593b8897d062a04c3b853e4fc99fd762aca2"
 QUERY = "what is the approved maintenance window?"
 BODY = b"Service policy: approved maintenance window is 02:00-04:00 UTC."
+DISTRACTOR = b"Office note: the lobby fern is watered on Tuesdays."
 GENERATION = "generation_navigation_canary_v1"
+DISTRACTOR_GENERATION = "generation_navigation_canary_distractor_v1"
 TENANT = TenantId("tenant_navigation_canary")
 _ACTIVE_DAEMON: subprocess.Popen[str] | None = None
 
@@ -244,6 +246,32 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
     )
     if any(len(item.values) != 384 for item in embedded):
         raise RuntimeError("navigation MiniLM chunk dimensions differ")
+    distractor = SourceArtifact(
+        tenant=TENANT,
+        source_id="office_notes",
+        source_version="navigation-v1",
+        body=DISTRACTOR,
+        content_type="text/plain",
+        license_id="Apache-2.0",
+        content_digest=hashlib.sha256(DISTRACTOR).hexdigest(),
+    )
+    distractor_policy = SourcePolicy(
+        source_id=distractor.source_id,
+        allowed_hosts=("notes.example.com",),
+        allowed_mime_types=("text/plain",),
+        allowed_license_ids=("Apache-2.0",),
+        max_download_bytes=4096,
+    )
+    distractor_embedded = tuple(
+        EmbeddedChunk(
+            chunk,
+            embedder.profile,
+            checked_embedding(embedder, chunk.text),
+        )
+        for chunk in chunk_validated_artifact(validator.validate(distractor), ChunkingPolicy())
+    )
+    if any(len(item.values) != 384 for item in distractor_embedded):
+        raise RuntimeError("navigation distractor chunk dimensions differ")
     data = arguments.work_root / "native"
     socket_path = arguments.work_root / "hyphae.sock"
     owner_key = arguments.work_root / "owner.key"
@@ -308,7 +336,10 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         receipts = PublicationReceiptStore(arguments.work_root / "receipts")
         coordinator = KnowledgeCoordinator(
             sufficiency=policy,
-            acquisition=AcquisitionPolicy(version="navigation-policy-v1", sources=(source_policy,)),
+            acquisition=AcquisitionPolicy(
+                version="navigation-policy-v1",
+                sources=(source_policy, distractor_policy),
+            ),
             store=store,
             embedding_profile=embedder.profile,
         )
@@ -318,31 +349,13 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             evidence=EvidenceBundle(
                 TENANT,
                 hashlib.sha256(normalize_query(QUERY).encode()).hexdigest(),
-                GENERATION,
+                DISTRACTOR_GENERATION,
                 (),
             ),
-            source_id=artifact.source_id,
+            source_id=distractor.source_id,
         )
         if pending.job_id is None:
-            raise RuntimeError("navigation job did not enqueue")
-        empty_bundle = EvidenceBundle(
-            TENANT,
-            hashlib.sha256(normalize_query(QUERY).encode()).hexdigest(),
-            GENERATION,
-            (),
-        )
-        empty_certificate = _certificate(empty_bundle, policy)
-        empty_decision = decide_navigation_step(
-            backbone=backbone,
-            pilot=pilot,
-            query=QUERY,
-            evidence=empty_bundle,
-            policy=policy,
-            search_steps_used=0,
-            device=device,
-        )
-        if empty_decision.action != "search":
-            raise RuntimeError("navigation pilot did not request the required search")
+            raise RuntimeError("navigation distractor job did not enqueue")
         ingestor = HyphaeShadowIngestor(
             tenant=TENANT,
             client=client,
@@ -355,23 +368,30 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         job = coordinator.job_status(TENANT, pending.job_id)
         if job is None or ingestor.target is None:
             raise RuntimeError("navigation job or target is absent")
-        key_id = ingest_idempotency_key(job, embedded, embedder.profile, target=ingestor.target)
-        manifest = GenerationManifest(
+        distractor_key = ingest_idempotency_key(
+            job, distractor_embedded, embedder.profile, target=ingestor.target
+        )
+        distractor_manifest = GenerationManifest(
             tenant=TENANT,
-            generation_id=GENERATION,
+            generation_id=DISTRACTOR_GENERATION,
             target=ingestor.target,
             parent_generation_id=None,
-            chunk_ids=tuple(item.chunk.chunk_id for item in embedded),
-            ingest_idempotency_keys=(key_id,),
+            chunk_ids=tuple(item.chunk.chunk_id for item in distractor_embedded),
+            ingest_idempotency_keys=(distractor_key,),
             ingest_receipt_digests=(),
         )
         authority = GenerationAuthority(store, receipts=receipts)
-        authority.register(manifest)
+        authority.register(distractor_manifest)
         worker = DurableAcquisitionWorker(
             worker_id="navigation-canary-acquisition",
             lease_seconds=120,
             coordinator=coordinator,
-            connector=InMemorySourceConnector({(TENANT.value, artifact.source_id): artifact}),
+            connector=InMemorySourceConnector(
+                {
+                    (TENANT.value, artifact.source_id): artifact,
+                    (TENANT.value, distractor.source_id): distractor,
+                }
+            ),
             embedder=embedder,
             ingestor=ingestor,
             verifier=ingestor,
@@ -385,9 +405,75 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         )
         outcome = worker.run_next(job_id=pending.job_id)
         if outcome is None or outcome.receipt is None or outcome.job.status is not JobStatus.READY:
+            raise RuntimeError("navigation distractor publication did not become ready")
+        distractor_activation = authority.activate(
+            DISTRACTOR_GENERATION,
+            expected_revision=0,
+            actor="navigation-canary-operator",
+            reason="navigation canary distractor generation",
+        )
+        router = GenerationRoutedRetriever(
+            tenant=TENANT,
+            authority=authority,
+            client=client,
+            profile=HYPHAE_210_RETRIEVAL_PROFILE,
+            embedder=embedder,
+            request_options_factory=lambda timeout: RequestOptions(
+                deadline_micros=time.time_ns() // 1000 + int(timeout * 1_000_000)
+            ),
+        )
+        distractor_evidence = router.retrieve(TENANT, QUERY, timeout_seconds=30)
+        if not distractor_evidence.hits:
+            raise RuntimeError("navigation distractor retrieval returned no evidence")
+        step0_decision = decide_navigation_step(
+            backbone=backbone,
+            pilot=pilot,
+            query=QUERY,
+            evidence=distractor_evidence,
+            policy=policy,
+            search_steps_used=0,
+            device=device,
+        )
+        if step0_decision.action != "search":
+            raise RuntimeError("navigation pilot did not request the required search")
+        body_pending = coordinator.answer_or_enqueue(
+            tenant=TENANT,
+            query=QUERY,
+            evidence=EvidenceBundle(
+                TENANT,
+                hashlib.sha256(normalize_query(QUERY).encode()).hexdigest(),
+                GENERATION,
+                (),
+            ),
+            source_id=artifact.source_id,
+        )
+        if body_pending.job_id is None:
+            raise RuntimeError("navigation body job did not enqueue")
+        body_job = coordinator.job_status(TENANT, body_pending.job_id)
+        if body_job is None:
+            raise RuntimeError("navigation body job is absent")
+        key_id = ingest_idempotency_key(
+            body_job, embedded, embedder.profile, target=ingestor.target
+        )
+        manifest = GenerationManifest(
+            tenant=TENANT,
+            generation_id=GENERATION,
+            target=ingestor.target,
+            parent_generation_id=DISTRACTOR_GENERATION,
+            chunk_ids=tuple(item.chunk.chunk_id for item in embedded),
+            ingest_idempotency_keys=(key_id,),
+            ingest_receipt_digests=(),
+        )
+        authority.register(manifest)
+        body_outcome = worker.run_next(job_id=body_pending.job_id)
+        if (
+            body_outcome is None
+            or body_outcome.receipt is None
+            or body_outcome.job.status is not JobStatus.READY
+        ):
             raise RuntimeError("navigation live publication did not become ready")
-        receipt = outcome.receipt
-        prepared = store.prepared_ingest(TENANT, pending.job_id)
+        receipt = body_outcome.receipt
+        prepared = store.prepared_ingest(TENANT, body_pending.job_id)
         if prepared is None:
             raise RuntimeError("navigation prepared ingest is absent")
     _stop_daemon(daemon, socket_path)
@@ -419,7 +505,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         authority.verify_candidate(manifest, (receipt,))
         activation = authority.activate(
             GENERATION,
-            expected_revision=0,
+            expected_revision=1,
             actor="navigation-canary-operator",
             reason="real navigation canary bootstrap",
         )
@@ -454,9 +540,9 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             {
                 "step": 0,
                 "search_steps_used": 0,
-                "evidence_handles": [],
-                "action": empty_decision.action,
-                "selected_handles": list(empty_decision.selected_handles),
+                "evidence_handles": [hit.handle for hit in distractor_evidence.hits],
+                "action": step0_decision.action,
+                "selected_handles": list(step0_decision.selected_handles),
             },
             {
                 "step": 1,
@@ -467,8 +553,8 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             },
         ]
         passed = (
-            empty_decision.action == "search"
-            and not empty_decision.selected_handles
+            step0_decision.action == "search"
+            and not step0_decision.selected_handles
             and live_decision.action == "answer"
             and tuple(live_decision.selected_handles) == tuple(hit.handle for hit in evidence.hits)
         )
@@ -504,12 +590,14 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             "publication": _json_value(asdict(receipt)),
             "generation": {
                 "manifest_digest": manifest.manifest_digest,
+                "distractor_manifest_digest": distractor_manifest.manifest_digest,
+                "distractor_activation": _json_value(asdict(distractor_activation)),
                 "activation": _json_value(asdict(activation)),
                 "snapshot": _json_value(asdict(authority.snapshot())),
             },
             "pilot": {
                 "maximum_evidence_items": maximum_evidence_items,
-                "empty_certificate": list(empty_certificate),
+                "distractor_certificate": list(_certificate(distractor_evidence, policy)),
                 "live_certificate": list(live_certificate),
                 "steps": steps,
             },
