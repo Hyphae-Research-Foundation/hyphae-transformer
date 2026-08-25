@@ -1335,7 +1335,7 @@ def _read_unified_evidence(
         if report_name == "navigation-campaign-report.json"
         else UNIFIED_EVIDENCE
     ):
-        raise ValueError("unified evidence archive is incomplete")
+        raise ValueError(f"unified evidence archive is incomplete: got {sorted(members)}")
     value = json.loads(members[report_name])
     if not isinstance(value, dict):
         raise ValueError("unified report is not an object")
