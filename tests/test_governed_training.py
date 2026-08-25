@@ -384,3 +384,24 @@ def test_bounded_policy_certificates_cannot_be_reversed() -> None:
     )
     assert logits.action_logits.argmax(-1).item() == 0
     assert (logits.evidence_logits >= 0).tolist() == [[True, False]]
+
+
+def test_minimum_loss_checkpoint_restores_selected_state(tmp_path: Path) -> None:
+    backbone = FixtureBackboneV1()
+    torch.manual_seed(17)
+    head = ReZeroSequenceControlHead(backbone.hidden_size, control_size=32, n_layers=1)
+    summary = train_control_head(
+        backbone,
+        head,
+        records(),
+        ControlTrainConfig(
+            epochs=4,
+            learning_rate=0.01,
+            checkpoint_selection="minimum_training_loss",
+        ),
+        checkpoint=tmp_path / "minimum.pt",
+    )
+    assert summary.selected_loss == summary.best_loss
+    assert 1 <= summary.selected_epoch <= summary.epochs
+    checkpoint = torch.load(tmp_path / "minimum.pt", weights_only=True)
+    assert checkpoint["config"]["checkpoint_selection"] == "minimum_training_loss"

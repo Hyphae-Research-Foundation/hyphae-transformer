@@ -217,7 +217,7 @@ def run_rezero_sequence_experiment(
                 "adversarial": asdict(adversarial),
                 "passed": (
                     bool(training_summary["backbone_unchanged"])
-                    and _as_float(training_summary["final_loss"])
+                    and _as_float(training_summary["selected_loss"])
                     <= _as_float(training_summary["initial_loss"])
                     and test.passed
                     and adversarial.passed
@@ -405,6 +405,7 @@ def _train_config(
         optimizer=str(training["optimizer"]),
         weight_decay=float(training["weight_decay"]),
         pointer_loss_scope=str(training["pointer_loss_scope"]),
+        checkpoint_selection=str(training.get("checkpoint_selection", "final")),
     )
 
 
@@ -441,7 +442,7 @@ def _selection_key(
         -statistics.fmean(_as_float(value["abstention_recall"]) for value in validations),
         -statistics.fmean(_as_float(value["evidence_exact_match"]) for value in validations),
         -statistics.fmean(_as_float(value["action_accuracy"]) for value in validations),
-        statistics.fmean(_as_float(value["final_loss"]) for value in training),
+        statistics.fmean(_as_float(value["selected_loss"]) for value in training),
         learning_rate,
     )
 
