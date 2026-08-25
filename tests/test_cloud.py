@@ -677,6 +677,25 @@ def test_unified_hyphae_minilm_gemma_plan_is_strict(tmp_path: Path) -> None:
         )
 
 
+def test_rezero_unified_plan_uses_pinned_bundle_and_controller(tmp_path: Path) -> None:
+    wheel = tmp_path / "hyphae_sdk-2.1.0-py3-none-any.whl"
+    source = Path(
+        "/tmp/opencode/hyphae-v210-artifacts/wheel/"
+        "hyphae_sdk-2.1.0-py3-none-any.whl"
+    )
+    if not source.is_file():
+        pytest.skip("exact Hyphae wheel is unavailable")
+    wheel.write_bytes(source.read_bytes())
+    cloud_plan = rezero_unified_plan(tmp_path, wheel)
+    commands = digitalocean.planned_commands(cloud_plan)
+    bootstrap = commands[1][-1]
+    campaign = commands[2][-1]
+    assert "rezero-control-v4.0.0" in bootstrap
+    assert "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121" in bootstrap
+    assert "--controller-kind rezero-v4" in campaign
+    assert "gemma4-e4b-rezero-control-v4-seed17.tar.gz" in campaign
+
+
 def gemma_plan(tmp_path: Path) -> CloudCampaignPlan:
     return CloudCampaignPlan(
         name="hyphae-e4b-control-smoke-x1",
@@ -755,6 +774,19 @@ def unified_plan(tmp_path: Path, wheel: Path) -> CloudCampaignPlan:
         accelerator="amd-rocm",
         hyphae_sdk_wheel=wheel,
     )
+
+
+def rezero_unified_plan(tmp_path: Path, wheel: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(unified_plan(tmp_path, wheel), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-minilm-gemma-rezero-canary-v1",
+        campaign_command=("canary-hyphae-minilm-gemma-rezero-v1",),
+        artifact_directory=tmp_path / "rezero-unified-evidence",
+    )
+    return CloudCampaignPlan(**values)
 
 
 def gemma_training_plan(tmp_path: Path) -> CloudCampaignPlan:

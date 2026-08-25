@@ -1,0 +1,18 @@
+{
+  "accelerator": "amd-rocm",
+  "artifact_directory": "artifacts/hyphae-minilm-gemma-rezero-mi355x1-canary-v1",
+  "campaign_command": ["canary-hyphae-minilm-gemma-rezero-v1"],
+  "data_command": ["prepare-gemma4-e4b"],
+  "hourly_rate_usd": 4.5,
+  "hyphae_sdk_wheel": "/tmp/opencode/hyphae-v210-artifacts/wheel/hyphae_sdk-2.1.0-py3-none-any.whl",
+  "image": "amddevelopercloud-pytorch2100rocm724",
+  "max_cost_usd": 2.25,
+  "max_lifetime_seconds": 1800,
+  "name": "hyphae-minilm-gemma-rezero-canary-v1",
+  "region": "mem1",
+  "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
+  "revision": "replace-with-merged-40-character-commit-sha",
+  "size": "gpu-mi355x1-288gb-spot",
+  "ssh_key_id": "55649085",
+  "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
+}

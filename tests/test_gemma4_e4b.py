@@ -13,7 +13,10 @@ from torch import nn
 
 from celiums_rezero.governed.data import load_governed_dataset
 from celiums_rezero.governed.gemma4 import Gemma4E4BFrozenBackbone
-from celiums_rezero.governed.runtime import quoted_runtime_manifest_sha256
+from celiums_rezero.governed.runtime import (
+    REZERO_QUOTED_RUNTIME_VERSION,
+    quoted_runtime_manifest_sha256,
+)
 from celiums_rezero.governed.schemas import (
     DatasetSplit,
     GovernedDatasetManifest,
@@ -46,6 +49,9 @@ def test_gemma_artifact_and_quoted_runtime_manifests_are_pinned() -> None:
             "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
         )
     ) == 64
+    assert quoted_runtime_manifest_sha256(
+        "5" * 64, runtime_version=REZERO_QUOTED_RUNTIME_VERSION
+    ) != quoted_runtime_manifest_sha256("5" * 64)
 
 
 class FakeTokenizer:
