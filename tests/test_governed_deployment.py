@@ -11,9 +11,13 @@ from celiums_rezero.governed import (
     AuditedShadowObserver,
     ControlAction,
     GovernedControlHead,
+    ReZeroSequenceControlHead,
     build_deployment_bundle,
+    build_rezero_deployment_bundle,
     inspect_deployment_bundle,
+    inspect_rezero_deployment_bundle,
     load_deployment_bundle,
+    load_rezero_deployment_bundle,
 )
 from celiums_rezero.governed.backbone import FixtureBackboneV1
 from celiums_rezero.knowledge.operations import AuditChain
@@ -197,3 +201,130 @@ def test_audited_shadow_observer_appends_result(tmp_path: Path) -> None:
     assert len(records) == 1
     assert records[0].outcome == "matched"
     assert records[0].detail["bundle_id"] == "gcb_fixture"
+
+
+def test_rezero_bundle_is_deterministic_and_loadable(tmp_path: Path) -> None:
+    backbone = FixtureBackboneV1()
+    head = ReZeroSequenceControlHead(
+        backbone.hidden_size,
+        control_size=32,
+        n_layers=1,
+        n_heads=4,
+    )
+    checkpoint = tmp_path / "rezero-control.pt"
+    torch.save(
+        {
+            "version": 1,
+            "head": head.state_dict(),
+            "optimizer": {},
+            "config": {"learning_rate": 0.001},
+            "backbone": json.dumps(
+                {
+                    "family": backbone.identity.family,
+                    "model_id": backbone.identity.model_id,
+                    "revision": backbone.identity.revision,
+                    "artifact_manifest_sha256": backbone.identity.artifact_manifest_sha256,
+                    "tokenizer_manifest_sha256": backbone.identity.tokenizer_manifest_sha256,
+                    "runtime_version": backbone.identity.runtime_version,
+                    "feature_contract": backbone.identity.feature_contract,
+                    "hidden_size": backbone.identity.hidden_size,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "backbone_state": backbone.state_fingerprint(),
+            "maximum_evidence_items": 8,
+            "action_order": ["answer", "request_evidence", "abstain"],
+            "record_digest": "0" * 64,
+        },
+        checkpoint,
+    )
+    preregistration = tmp_path / "preregistration.json"
+    preregistration.write_text(
+        json.dumps(
+            {
+                "candidate": {
+                    "control_size": 32,
+                    "layers": 1,
+                    "n_heads": 4,
+                    "maximum_evidence_items": 8,
+                    "residual_strategy": "rezero_rms_shared",
+                    "gate_init": 0.0,
+                },
+                "dataset": {"governed_dataset_id": "gtd_fixture"},
+                "training_search": {
+                    "candidate_learning_rates": [0.001],
+                    "pointer_policy_score": 0.72,
+                    "pointer_policy_scale": 20.0,
+                    "pointer_threshold": 0.5,
+                    "minimum_confidence": 0.5,
+                },
+            }
+        )
+    )
+    report = tmp_path / "training-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "schema": "hyphae-transformer.rezero-sequence-control-experiment/v1",
+                "completed": True,
+                "passed": True,
+                "scope": "gemma",
+                "backbone_unchanged": True,
+                "backbone": {
+                    "model_id": backbone.identity.model_id,
+                    "revision": backbone.identity.revision,
+                    "feature_contract": backbone.identity.feature_contract,
+                },
+                "dataset_id": "gtd_fixture",
+                "selected_learning_rate": 0.001,
+                "preregistration_sha256": hashlib.sha256(
+                    preregistration.read_bytes()
+                ).hexdigest(),
+                "final": [
+                    {
+                        "seed": 17,
+                        "passed": True,
+                        "checkpoint_sha256": hashlib.sha256(
+                            checkpoint.read_bytes()
+                        ).hexdigest(),
+                    }
+                ],
+            }
+        )
+    )
+    dataset = tmp_path / "dataset-manifest.json"
+    dataset.write_text(json.dumps({"dataset_id": "gtd_fixture"}))
+    bundle = tmp_path / "rezero-bundle.tar.gz"
+    manifest = build_rezero_deployment_bundle(
+        output=bundle,
+        checkpoint=checkpoint,
+        training_report=report,
+        preregistration=preregistration,
+        dataset_manifest=dataset,
+        source_revision="2" * 40,
+    )
+    second = tmp_path / "rezero-bundle-second.tar.gz"
+    build_rezero_deployment_bundle(
+        output=second,
+        checkpoint=checkpoint,
+        training_report=report,
+        preregistration=preregistration,
+        dataset_manifest=dataset,
+        source_revision="2" * 40,
+    )
+    assert bundle.read_bytes() == second.read_bytes()
+    assert inspect_rezero_deployment_bundle(bundle) == manifest
+    controller = load_rezero_deployment_bundle(
+        bundle,
+        expected_bundle_sha256=hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        backbone=backbone,
+        device=torch.device("cpu"),
+    )
+    assert controller.manifest.bundle_id.startswith("rzcb_")
+    result = controller.observe(
+        query="missing",
+        evidence=EvidenceBundle(TenantId("tenant_a"), "0" * 64, "generation", ()),
+        host_decision=SufficiencyDecision.ABSENT,
+    )
+    assert result.selected_handles == ()

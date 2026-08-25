@@ -15,7 +15,11 @@ from typing import Protocol, cast
 import torch
 
 from celiums_rezero.governed.backbone import FrozenTextBackbone, validate_frozen_features
-from celiums_rezero.governed.model import GovernedControlHead, decode_control
+from celiums_rezero.governed.model import (
+    GovernedControlHead,
+    ReZeroSequenceControlHead,
+    decode_control,
+)
 from celiums_rezero.governed.schemas import ControlAction
 from celiums_rezero.knowledge.operations import AuditChain
 from celiums_rezero.knowledge.schemas import (
@@ -26,6 +30,7 @@ from celiums_rezero.knowledge.schemas import (
 from celiums_rezero.lab.serialization import canonical_json
 
 BUNDLE_SCHEMA = "hyphae-transformer.governed-control-bundle/v1"
+REZERO_BUNDLE_SCHEMA = "hyphae-transformer.rezero-sequence-control-bundle/v1"
 SHADOW_SCHEMA = "hyphae-transformer.governed-control-shadow/v1"
 ACTION_ORDER = ("answer", "request_evidence", "abstain")
 
@@ -53,6 +58,30 @@ class DeploymentBundleManifest:
     use_evidence_scores: bool
     use_host_control_features: bool
     pointer_policy_score: float | None
+    pointer_policy_scale: float
+    pointer_threshold: float
+    minimum_confidence: float
+    action_order: tuple[str, ...]
+    artifacts: tuple[ArtifactDigest, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReZeroDeploymentBundleManifest:
+    schema: str
+    bundle_id: str
+    source_revision: str
+    model_id: str
+    model_revision: str
+    feature_contract: str
+    dataset_id: str
+    seed: int
+    maximum_evidence_items: int
+    control_size: int
+    layers: int
+    heads: int
+    residual_strategy: str
+    gate_init: float
+    pointer_policy_score: float
     pointer_policy_scale: float
     pointer_threshold: float
     minimum_confidence: float
@@ -196,6 +225,168 @@ def inspect_deployment_bundle(bundle: Path) -> DeploymentBundleManifest:
         return manifest
 
 
+def build_rezero_deployment_bundle(
+    *,
+    output: Path,
+    checkpoint: Path,
+    training_report: Path,
+    preregistration: Path,
+    dataset_manifest: Path,
+    source_revision: str,
+    seed: int = 17,
+) -> ReZeroDeploymentBundleManifest:
+    _validate_source_revision(source_revision)
+    report = json.loads(training_report.read_text())
+    prereg = json.loads(preregistration.read_text())
+    dataset = json.loads(dataset_manifest.read_text())
+    selected = float(report.get("selected_learning_rate", -1))
+    seed_report = next((item for item in report.get("final", ()) if item["seed"] == seed), None)
+    training = prereg["training_search"]
+    candidate = prereg["candidate"]
+    if (
+        report.get("schema") != "hyphae-transformer.rezero-sequence-control-experiment/v1"
+        or report.get("completed") is not True
+        or report.get("passed") is not True
+        or report.get("scope") != "gemma"
+        or report.get("backbone_unchanged") is not True
+        or seed_report is None
+        or seed_report.get("passed") is not True
+        or selected not in training["candidate_learning_rates"]
+    ):
+        raise ValueError("ReZero deployment requires a completed passing canonical seed")
+    if _sha256(checkpoint) != seed_report["checkpoint_sha256"]:
+        raise ValueError("ReZero checkpoint digest does not match its training report")
+    prereg_digest = _sha256(preregistration)
+    if report.get("preregistration_sha256") != prereg_digest:
+        raise ValueError("ReZero training report is bound to another preregistration")
+    dataset_id = dataset.get("dataset_id")
+    if (
+        dataset_id != report.get("dataset_id")
+        or dataset_id != prereg["dataset"]["governed_dataset_id"]
+    ):
+        raise ValueError("ReZero deployment dataset identities do not match")
+    artifact_sources = {
+        "rezero-control.pt": checkpoint,
+        "training-report.json": training_report,
+        "preregistration.json": preregistration,
+        "dataset-manifest.json": dataset_manifest,
+    }
+    artifacts = tuple(
+        ArtifactDigest(name, path.stat().st_size, _sha256(path))
+        for name, path in sorted(artifact_sources.items())
+    )
+    manifest = ReZeroDeploymentBundleManifest(
+        schema=REZERO_BUNDLE_SCHEMA,
+        bundle_id="",
+        source_revision=source_revision,
+        model_id=str(report["backbone"]["model_id"]),
+        model_revision=str(report["backbone"]["revision"]),
+        feature_contract=str(report["backbone"]["feature_contract"]),
+        dataset_id=str(dataset_id),
+        seed=seed,
+        maximum_evidence_items=int(candidate["maximum_evidence_items"]),
+        control_size=int(candidate["control_size"]),
+        layers=int(candidate["layers"]),
+        heads=int(candidate["n_heads"]),
+        residual_strategy=str(candidate["residual_strategy"]),
+        gate_init=float(candidate["gate_init"]),
+        pointer_policy_score=float(training["pointer_policy_score"]),
+        pointer_policy_scale=float(training["pointer_policy_scale"]),
+        pointer_threshold=float(training["pointer_threshold"]),
+        minimum_confidence=float(training["minimum_confidence"]),
+        action_order=ACTION_ORDER,
+        artifacts=artifacts,
+    )
+    identity = _rezero_manifest_dict(manifest)
+    identity.pop("bundle_id")
+    manifest = replace(
+        manifest,
+        bundle_id=f"rzcb_{hashlib.sha256(canonical_json(identity).encode()).hexdigest()}",
+    )
+    _write_bundle(output, artifact_sources, _rezero_manifest_dict(manifest))
+    return manifest
+
+
+def inspect_rezero_deployment_bundle(bundle: Path) -> ReZeroDeploymentBundleManifest:
+    with tarfile.open(bundle, "r:gz") as archive:
+        members = {member.name: member for member in archive.getmembers()}
+        manifest_member = members.get("manifest.json")
+        if manifest_member is None or not manifest_member.isfile():
+            raise ValueError("ReZero deployment manifest is absent")
+        manifest = _rezero_manifest(json.loads(_archive_bytes(archive, manifest_member)))
+        for artifact in manifest.artifacts:
+            member = members.get(artifact.path)
+            if member is None or not member.isfile():
+                raise ValueError("ReZero deployment artifact is absent")
+            payload = _archive_bytes(archive, member)
+            if (
+                len(payload) != artifact.bytes
+                or hashlib.sha256(payload).hexdigest() != artifact.sha256
+            ):
+                raise ValueError("ReZero deployment artifact digest does not match")
+        if set(members) != {"manifest.json", *(item.path for item in manifest.artifacts)}:
+            raise ValueError("ReZero deployment bundle member set is invalid")
+        return manifest
+
+
+def load_rezero_deployment_bundle(
+    bundle: Path,
+    *,
+    expected_bundle_sha256: str,
+    backbone: FrozenTextBackbone,
+    device: torch.device,
+) -> GovernedShadowController:
+    if bundle.is_symlink() or not bundle.is_file() or _sha256(bundle) != expected_bundle_sha256:
+        raise ValueError("ReZero deployment bundle digest does not match")
+    manifest = inspect_rezero_deployment_bundle(bundle)
+    expected = {
+        "manifest.json",
+        "rezero-control.pt",
+        "training-report.json",
+        "preregistration.json",
+        "dataset-manifest.json",
+    }
+    with tarfile.open(bundle, "r:gz") as archive:
+        members = {member.name: member for member in archive.getmembers()}
+        if set(members) != expected or any(
+            not member.isfile() or member.name.startswith(("/", "../"))
+            for member in members.values()
+        ):
+            raise ValueError("ReZero deployment bundle member set is invalid")
+        payloads = {name: _archive_bytes(archive, members[name]) for name in expected}
+    if (
+        backbone.identity.model_id != manifest.model_id
+        or backbone.identity.revision != manifest.model_revision
+        or backbone.identity.feature_contract != manifest.feature_contract
+    ):
+        raise ValueError("ReZero deployment backbone identity does not match")
+    checkpoint = torch.load(
+        __import__("io").BytesIO(payloads["rezero-control.pt"]),
+        map_location=device,
+        weights_only=False,
+    )
+    if (
+        checkpoint.get("version") != 1
+        or tuple(checkpoint.get("action_order", ())) != manifest.action_order
+        or checkpoint.get("maximum_evidence_items") != manifest.maximum_evidence_items
+        or json.loads(checkpoint.get("backbone", "{}"))
+        != json.loads(canonical_json(backbone.identity))
+    ):
+        raise ValueError("ReZero deployment checkpoint contract is invalid")
+    head = ReZeroSequenceControlHead(
+        backbone.identity.hidden_size,
+        control_size=manifest.control_size,
+        n_layers=manifest.layers,
+        n_heads=manifest.heads,
+        pointer_policy_score=manifest.pointer_policy_score,
+        pointer_policy_scale=manifest.pointer_policy_scale,
+        maximum_evidence_items=manifest.maximum_evidence_items,
+    ).to(device)
+    head.load_state_dict(checkpoint["head"], strict=True)
+    head.eval()
+    return GovernedShadowController(manifest, backbone, head, device=device)
+
+
 def load_deployment_bundle(
     bundle: Path,
     *,
@@ -272,9 +463,9 @@ def load_deployment_bundle(
 class GovernedShadowController:
     def __init__(
         self,
-        manifest: DeploymentBundleManifest,
+        manifest: DeploymentBundleManifest | ReZeroDeploymentBundleManifest,
         backbone: FrozenTextBackbone,
-        head: GovernedControlHead,
+        head: GovernedControlHead | ReZeroSequenceControlHead,
         *,
         device: torch.device,
     ) -> None:
@@ -461,6 +652,71 @@ def _manifest(value: object) -> DeploymentBundleManifest:
     if manifest.schema != BUNDLE_SCHEMA or manifest.bundle_id != expected:
         raise ValueError("deployment bundle identity is invalid")
     return manifest
+
+
+def _rezero_manifest_dict(value: ReZeroDeploymentBundleManifest) -> dict[str, object]:
+    result = json.loads(canonical_json(value))
+    if not isinstance(result, dict):
+        raise TypeError("ReZero deployment manifest serialization is invalid")
+    return cast(dict[str, object], result)
+
+
+def _rezero_manifest(value: object) -> ReZeroDeploymentBundleManifest:
+    if not isinstance(value, dict):
+        raise ValueError("ReZero deployment manifest must be an object")
+    artifacts = value.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ValueError("ReZero deployment artifact manifest is invalid")
+    manifest = ReZeroDeploymentBundleManifest(
+        **{key: item for key, item in value.items() if key not in {"artifacts", "action_order"}},
+        action_order=tuple(cast(list[str], value["action_order"])),
+        artifacts=tuple(ArtifactDigest(**item) for item in artifacts),
+    )
+    identity = _rezero_manifest_dict(manifest)
+    identity.pop("bundle_id")
+    expected = f"rzcb_{hashlib.sha256(canonical_json(identity).encode()).hexdigest()}"
+    if (
+        manifest.schema != REZERO_BUNDLE_SCHEMA
+        or manifest.bundle_id != expected
+        or manifest.residual_strategy != "rezero_rms_shared"
+        or manifest.gate_init != 0
+        or manifest.action_order != ACTION_ORDER
+    ):
+        raise ValueError("ReZero deployment bundle identity is invalid")
+    return manifest
+
+
+def _write_bundle(
+    output: Path, artifact_sources: dict[str, Path], manifest: dict[str, object]
+) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent) as temporary_name:
+        root = Path(temporary_name)
+        for name, source in artifact_sources.items():
+            (root / name).write_bytes(source.read_bytes())
+        (root / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="ascii",
+        )
+        with output.open("wb") as raw_output, gzip.GzipFile(
+            fileobj=raw_output, mode="wb", mtime=0, filename=""
+        ) as compressed, tarfile.open(
+            fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT
+        ) as archive:
+            for path in sorted(root.iterdir(), key=lambda item: item.name):
+                info = archive.gettarinfo(str(path), arcname=path.name)
+                info.mtime = 0
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                with path.open("rb") as file_source:
+                    archive.addfile(info, file_source)
+
+
+def _validate_source_revision(source_revision: str) -> None:
+    if len(source_revision) != 40 or any(
+        character not in "0123456789abcdef" for character in source_revision
+    ):
+        raise ValueError("deployment source revision must be a full lowercase Git SHA")
 
 
 def _archive_bytes(archive: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
