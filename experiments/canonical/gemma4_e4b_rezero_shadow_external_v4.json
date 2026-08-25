@@ -1,0 +1,20 @@
+{
+  "bundle_id": "rzcb_18347c6eca826c4eea75aa78a8ddbbe69e7c2adfebe9921985ead9bc364a92ee",
+  "bundle_sha256": "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121",
+  "cases_sha256": "0f3796e7b2e3d43287a4ee80e51cc14ab0efafb4507a8f69708474efe3d2d031",
+  "claim": "Bounded host action and per-item evidence certificates pass unchanged external shadow gates with zero unsafe upgrades.",
+  "controller_kind": "rezero_sequence_control_v1",
+  "gates": {
+    "action_match_rate": 0.9,
+    "maximum_conservative_downgrades": 1,
+    "maximum_mean_latency_ms": 150.0,
+    "maximum_operational_divergences": 0,
+    "maximum_p95_latency_ms": 200.0,
+    "pointer_exact_match": 0.99,
+    "unsafe_upgrade_count": 0
+  },
+  "model_id": "google/gemma-4-E4B-it",
+  "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+  "schema": "hyphae-transformer.rezero-sequence-control-shadow-preregistration/v4",
+  "scope": "Unchanged twelve external cases; no case or label used in training, checkpoint selection, or bundle construction."
+}
