@@ -1,0 +1,21 @@
+{
+  "artifacts": {
+    "bootstrap_stderr_sha256": "75b9a1612a1a1e8c0bbbe701c614be33d5f95a2c188283108392c0624f3c9f20",
+    "bootstrap_stdout_sha256": "3c7eaad5e74e28e7d0b377ef7dd8b0dc551a628a5d6af6b05a80f027a366931d",
+    "campaign_stderr_sha256": "3200bb25d2951e3bfaeba407bfdfa6935702b81627024dbbc2e4205419802671",
+    "campaign_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "cloud_execution_sha256": "d69df9ef11b5f2f6bf63a90f1db737f4c0b48e17ba2b2651ebb2f804299f2621"
+  },
+  "attempted_at": "2026-08-25T12:01:59.221219+00:00",
+  "campaign": "gemma4_e4b_rezero_sequence_control_v1_smoke",
+  "deleted_at": "2026-08-25T12:08:08.441923+00:00",
+  "droplet_id": 595021982,
+  "estimated_cost_usd": 0.46152588,
+  "failure": "ROCm torch rejected torch.cuda.reset_peak_memory_stats(torch.device('cuda:0')) with RuntimeError: Invalid device argument before model loading or ReZero evaluation.",
+  "lifetime_seconds": 369.220704,
+  "observations": 0,
+  "resources_remaining": 0,
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-smoke-attempt/v1",
+  "source_revision": "bb1ea1609b7ed32b966bcbe6ca388b1c538f505e",
+  "status": "invalid_environment_failure"
+}

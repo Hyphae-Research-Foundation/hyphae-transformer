@@ -45,3 +45,13 @@ The prospective comparison is fixed in
 
 At every stage, tenant routing, credentials, source policy, publication, generation
 activation, and notification remain host-owned.
+
+## First MI355X Smoke Attempt
+
+The first paid smoke produced no model observation. The pinned ROCm runtime rejected
+`torch.cuda.reset_peak_memory_stats(torch.device("cuda:0"))` before Gemma loading or
+ReZero evaluation. The Droplet was deleted and confirmed absent. The failed attempt and
+its content-addressed logs are recorded in
+[`experiments/results/gemma4_e4b_rezero_smoke_attempt_v1.json`](../experiments/results/gemma4_e4b_rezero_smoke_attempt_v1.json).
+The API call is corrected prospectively to use the already active device, matching the
+previously successful Gemma smoke convention.

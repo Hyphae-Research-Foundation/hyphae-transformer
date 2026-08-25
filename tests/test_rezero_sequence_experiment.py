@@ -161,3 +161,14 @@ def test_fixture_experiment_rejects_preregistration_drift(tmp_path: Path) -> Non
             feature_batch_size=64,
             scope="fixture",
         )
+
+
+def test_rezero_smoke_uses_active_device_for_rocm_memory_stats() -> None:
+    source = (ROOT / "scripts" / "smoke_gemma4_e4b_rezero_control.py").read_text()
+    experiment = (
+        ROOT / "src" / "celiums_rezero" / "governed" / "rezero_experiment.py"
+    ).read_text()
+    assert "reset_peak_memory_stats()" in source
+    assert "reset_peak_memory_stats(device)" not in source
+    assert "max_memory_allocated()" in experiment
+    assert "max_memory_allocated(device)" not in experiment

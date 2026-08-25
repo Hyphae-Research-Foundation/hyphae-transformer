@@ -31,7 +31,7 @@ def main() -> int:
     device = torch.device("cuda:0")
     if not torch.cuda.is_available() or torch.version.hip is None:
         raise RuntimeError("Gemma ReZero smoke requires ROCm")
-    torch.cuda.reset_peak_memory_stats(device)
+    torch.cuda.reset_peak_memory_stats()
     dataset = load_governed_dataset_directory(
         arguments.dataset,
         expected_dataset_id=str(preregistration["dataset"]["governed_dataset_id"]),
