@@ -1,0 +1,24 @@
+{
+  "bundle_id": "rzcb_9d506a053936aeb4b5f2de3380304fe96c6cc090eba295000341b9cfd8873015",
+  "bundle_sha256": "5ea905ede3ec42bb756714885aca42567655dbb4c4ebdd38029d11345872ca3c",
+  "cases_sha256": "0f3796e7b2e3d43287a4ee80e51cc14ab0efafb4507a8f69708474efe3d2d031",
+  "claim": "The host-policy-certificate v2 ReZero controller eliminates unsupported conservative downgrades while preserving zero unsafe upgrades on unchanged external cases.",
+  "controller_kind": "rezero_sequence_control_v1",
+  "gates": {
+    "action_match_rate": 0.9,
+    "maximum_conservative_downgrades": 1,
+    "maximum_mean_latency_ms": 150.0,
+    "maximum_operational_divergences": 0,
+    "maximum_p95_latency_ms": 200.0,
+    "pointer_exact_match": 0.99,
+    "unsafe_upgrade_count": 0
+  },
+  "model_id": "google/gemma-4-E4B-it",
+  "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+  "prior_result": {
+    "outcome": "negative",
+    "report_sha256": "6e6313c356edaa893f10ba7dc8844927dbc8a7284f1562f27329d4d222449a23"
+  },
+  "schema": "hyphae-transformer.rezero-sequence-control-shadow-preregistration/v2",
+  "scope": "The same twelve corrected deterministic non-MARS cases remain evaluation-only; no case content or label was used in v2 training or selection."
+}
