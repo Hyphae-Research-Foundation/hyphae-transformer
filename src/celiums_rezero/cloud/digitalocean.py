@@ -1157,7 +1157,12 @@ def _write_retrieved_evidence(
                 )
         elif plan.campaign_command[0] in UNIFIED_CAMPAIGNS:
             value, members = _read_unified_evidence(payload)
-            completed = _valid_unified_report(value, plan)
+            completed = _valid_unified_report(value, plan) or (
+                plan.campaign_command[0] == NAVIGATION_UNIFIED_CAMPAIGN
+                and value.get("schema")
+                == "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1"
+                and value.get("completed") is True
+            )
         else:
             value = json.loads(payload)
             completed = (
