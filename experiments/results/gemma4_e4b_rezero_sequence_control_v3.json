@@ -1,0 +1,30 @@
+{
+  "analysis": {
+    "backbone_unchanged": true,
+    "held_out_gates_passed": true,
+    "passed": false,
+    "report_id": "rzsc_3160278e6cde1c8fe55ab5b6153a6b7866b14fa851097bc7b285f3504605ac83",
+    "selected_learning_rate": 0.0001,
+    "verdict": "negative"
+  },
+  "artifacts": {
+    "archive_sha256": "a0f9bc6806490e8c2dde700a1cf89f18fe6184b19155de240be1d252aa3fdd36",
+    "cloud_execution_sha256": "2c894ceb3bed8573cb8eafabba642a3d46161b9dfdef7382cd6f7f66e76953db",
+    "report_sha256": "4fb665d5057f7b8caaf029ed54e4de7b6ecd68f88d39f35fa4037ed1216cf5c2"
+  },
+  "campaign": {
+    "completed": true,
+    "droplet_id": 595048378,
+    "estimated_cost_usd": 0.62976246375,
+    "resources_remaining": 0,
+    "status": "completed_failed_structural_gate"
+  },
+  "failure": {
+    "gate": "final_loss_not_greater_than_initial",
+    "reason": "The fixed certificates made initial loss nearly zero. All seeds reached a lower best loss during training but ended slightly above their initial loss at epoch 200.",
+    "seed_17": {"initial_loss": 2.1832946561772815e-09, "best_loss": 2.1832946561772815e-09, "final_loss": 5.0378750060531274e-09},
+    "seed_29": {"initial_loss": 1.3407177590352148e-09, "best_loss": 1.3407177590352148e-09, "final_loss": 5.091645771670983e-09},
+    "seed_43": {"initial_loss": 3.1917246623436313e-09, "best_loss": 3.1917246623436313e-09, "final_loss": 5.373333333835717e-09}
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-sequence-control-result/v3"
+}

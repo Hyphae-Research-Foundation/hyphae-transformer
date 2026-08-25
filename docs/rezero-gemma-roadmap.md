@@ -137,3 +137,11 @@ certificates contribute magnitude 20. Therefore learned semantics can rank withi
 certified class but cannot reverse action or evidence-support signs. The prospective
 protocol is
 [`experiments/canonical/gemma4_e4b_rezero_sequence_control_v3.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v3.json).
+
+The v3 run passed every validation, test, and adversarial quality gate with exact
+evidence sets and zero unsafe answers, but failed its structural loss gate. Certificates
+made the initial loss approximately `1e-9`; the fixed 200-epoch endpoint was slightly
+higher even though the best observed loss was lower. The negative result is preserved
+in
+[`experiments/results/gemma4_e4b_rezero_sequence_control_v3.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v3.json).
+No bundle or shadow promotion is allowed from this run.
