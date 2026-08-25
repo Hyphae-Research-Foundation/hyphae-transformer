@@ -25,6 +25,7 @@ REZERO_V4_BUNDLE_SHA256 = "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127
 HYPHAE_WHEEL_SHA256 = "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb"
 HYPHAE_WHEEL_BYTES = 87_754
 UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-v1"
+REZERO_UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-rezero-v1"
 UNIFIED_EVIDENCE = (
     "unified-campaign-report.json",
     "minilm-preflight.json",
@@ -127,6 +128,7 @@ class CloudCampaignPlan:
             "shadow-gemma4-e4b-rezero-v4",
             "canary-gemma4-e4b-quoted-runtime-v1",
             UNIFIED_CAMPAIGN,
+            REZERO_UNIFIED_CAMPAIGN,
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
@@ -150,6 +152,7 @@ class CloudCampaignPlan:
                 "shadow-gemma4-e4b-rezero-v4",
                 "canary-gemma4-e4b-quoted-runtime-v1",
                 UNIFIED_CAMPAIGN,
+                REZERO_UNIFIED_CAMPAIGN,
             }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
@@ -194,8 +197,8 @@ class CloudCampaignPlan:
             _validate_gemma_rezero_v4_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
             _validate_gemma_quoted_runtime_command(self.campaign_command)
-        if self.campaign_command[0] == UNIFIED_CAMPAIGN and (
-            self.campaign_command != (UNIFIED_CAMPAIGN,)
+        if self.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN} and (
+            self.campaign_command != (self.campaign_command[0],)
             or self.hyphae_sdk_wheel is None
         ):
             raise ValueError("unified campaign requires one exact Hyphae SDK wheel")
@@ -250,7 +253,7 @@ def execute_digitalocean_campaign(
         raise FileExistsError("cloud artifact directory is not empty")
     if runner is None:
         _verify_remote_revision(plan)
-    if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+    if plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
         _validate_hyphae_wheel(plan)
     droplet_id: int | None = None
     public_ip: str | None = None
@@ -284,7 +287,7 @@ def execute_digitalocean_campaign(
             ),
             sleep=sleep,
         )
-        if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        if plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
             wheel_upload = command_runner.run(
                 _wheel_upload_command(plan, public_ip),
                 timeout=min(
@@ -419,7 +422,7 @@ def planned_commands(plan: CloudCampaignPlan) -> list[list[str]]:
             "json",
         ],
     ]
-    if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+    if plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
         commands.append(_wheel_upload_command(plan, placeholder))
     commands.extend([
         _ssh_command(plan, placeholder, _bootstrap_script(plan)),
@@ -503,7 +506,7 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
     )
     if plan.accelerator == "amd-rocm":
         unified: tuple[str, ...] = ()
-        if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        if plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
             unified = (
                 (
                     "mv /tmp/hyphae_sdk-2.1.0-py3-none-any.whl "
@@ -558,6 +561,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "shadow-gemma4-e4b-rezero-v4",
         "canary-gemma4-e4b-quoted-runtime-v1",
         UNIFIED_CAMPAIGN,
+        REZERO_UNIFIED_CAMPAIGN,
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
@@ -696,6 +700,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 BUNDLE_SHA256,
             ]
         else:
+            rezero_unified = plan.campaign_command[0] == REZERO_UNIFIED_CAMPAIGN
             command = [
                 "python",
                 "/workspace/scripts/run_hyphae_minilm_gemma_canary.py",
@@ -710,7 +715,11 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "--gemma-model",
                 "/data/gemma4-e4b",
                 "--bundle",
-                "/data/gemma4-e4b-control-v3-seed17.tar.gz",
+                (
+                    "/data/gemma4-e4b-rezero-control-v4-seed17.tar.gz"
+                    if rezero_unified
+                    else "/data/gemma4-e4b-control-v3-seed17.tar.gz"
+                ),
                 "--source-revision",
                 plan.revision,
                 "--source-patch-sha256",
@@ -720,6 +729,8 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "--out",
                 "/runs",
             ]
+            if rezero_unified:
+                command.extend(("--controller-kind", "rezero-v4"))
         inner = (
             f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}"
         )
@@ -728,7 +739,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 (
                     "timeout --signal=TERM "
                     f"{campaign_seconds}s "
-                    f"{_rocm_container_command(plan, network_none=(plan.campaign_command[0] == UNIFIED_CAMPAIGN))} "  # noqa: E501
+                    f"{_rocm_container_command(plan, network_none=(plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}))} "  # noqa: E501
                     f"/bin/bash -lc {shlex.quote(inner)}"
                 ),
             )
@@ -763,7 +774,7 @@ def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
             )
         elif plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
             artifact = f"tar -C {plan.remote_run_root} -czf - . | base64 -w0"
-        elif plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        elif plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
             members = " ".join(shlex.quote(value) for value in UNIFIED_EVIDENCE)
             artifact = (
                 f"tar --ignore-failed-read -C {plan.remote_run_root} -czf - {members} "
@@ -798,6 +809,7 @@ def _validate_remote_source_patch(
     if plan.campaign_command[0] not in {
         "canary-gemma4-e4b-quoted-runtime-v1",
         UNIFIED_CAMPAIGN,
+        REZERO_UNIFIED_CAMPAIGN,
     }:
         return
     result = runner.run(
@@ -829,7 +841,7 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
         else "gemma4-e4b-quoted-runtime-canary.tar.gz"
         if plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1"
         else "hyphae-minilm-gemma-evidence.tar.gz"
-        if plan.campaign_command[0] == UNIFIED_CAMPAIGN
+        if plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}
         else "gemma4-e4b-rezero-smoke.json"
         if plan.campaign_command[0] == "smoke-gemma4-e4b-rezero-v1"
         else "gemma4-e4b-smoke.json"
@@ -892,7 +904,7 @@ def _rocm_bootstrap_inner(plan: CloudCampaignPlan) -> str:
             "git -C /workspace rev-parse HEAD > /runs/source-revision.txt",
             "PYTHONPATH=/python python -m pip freeze > /runs/python-freeze.txt",
         ]
-    if plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+    if plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
         commands.extend(
             [
                 (
@@ -925,6 +937,21 @@ def _rocm_bootstrap_inner(plan: CloudCampaignPlan) -> str:
                     "PYTHONPATH=/workspace/src:/python python "
                     "/workspace/scripts/download_minilm_l6_v2.py "
                     "--out /data/all-MiniLM-L6-v2 | tee /runs/minilm-preflight.json"
+                ),
+            ]
+        )
+    if plan.campaign_command[0] == REZERO_UNIFIED_CAMPAIGN:
+        commands.extend(
+            [
+                (
+                    "curl -LsSf -o /data/gemma4-e4b-rezero-control-v4-seed17.tar.gz "
+                    "https://github.com/Hyphae-Research-Foundation/hyphae-transformer/"
+                    "releases/download/rezero-control-v4.0.0/"
+                    "gemma4-e4b-rezero-control-v4-seed17.tar.gz"
+                ),
+                (
+                    f"echo '{REZERO_V4_BUNDLE_SHA256}  "
+                    "/data/gemma4-e4b-rezero-control-v4-seed17.tar.gz' | sha256sum -c -"
                 ),
             ]
         )
@@ -1052,7 +1079,7 @@ def _write_retrieved_evidence(
                     and value.get("passed") is True
                     and value.get("request_count") == 1
                 )
-        elif plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+        elif plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
             value, members = _read_unified_evidence(payload)
             completed = _valid_unified_report(value, plan)
         else:
@@ -1088,7 +1115,7 @@ def _write_retrieved_evidence(
             fileobj=BytesIO(payload), mode="r:gz"
         ) as archive:
             archive.extractall(plan.artifact_directory, filter="data")
-    elif plan.campaign_command[0] == UNIFIED_CAMPAIGN:
+    elif plan.campaign_command[0] in {UNIFIED_CAMPAIGN, REZERO_UNIFIED_CAMPAIGN}:
         for name, content in members.items():
             (plan.artifact_directory / name).write_bytes(content)
 
@@ -1130,6 +1157,16 @@ def _valid_unified_report(value: dict[str, object], plan: CloudCampaignPlan) -> 
     embedding = value.get("embedding")
     runtime = value.get("runtime")
     finalization = value.get("finalization")
+    expected_bundle = (
+        REZERO_V4_BUNDLE_SHA256
+        if plan.campaign_command[0] == REZERO_UNIFIED_CAMPAIGN
+        else BUNDLE_SHA256
+    )
+    expected_controller = (
+        "rezero-v4"
+        if plan.campaign_command[0] == REZERO_UNIFIED_CAMPAIGN
+        else "governed-v3"
+    )
     return (
         value.get("schema") == "hyphae-transformer.hyphae-minilm-gemma-canary/v1"
         and value.get("completed") is True
@@ -1143,6 +1180,7 @@ def _valid_unified_report(value: dict[str, object], plan: CloudCampaignPlan) -> 
         == "e5d9d07b6db0c99cc4a2afa92047d57b84c3cb6ed48137ad3612601fdbe21411"
         and dependencies.get("gemma_artifact_manifest_sha256")
         == "662a2f15fe866f2350da4bfeefc746b0eb72c917d344dda2602df88230401561"
+        and dependencies.get("bundle_sha256") == expected_bundle
         and isinstance(native, dict)
         and native.get("protocol") == [1, 5]
         and native.get("collection_definition_sha256") == (
@@ -1159,6 +1197,8 @@ def _valid_unified_report(value: dict[str, object], plan: CloudCampaignPlan) -> 
         and isinstance(runtime, dict)
         and runtime.get("request_count") == 1
         and runtime.get("decision") == "answer"
+        and runtime.get("bundle_sha256") == expected_bundle
+        and runtime.get("controller_kind") == expected_controller
         and isinstance(finalization, dict)
         and finalization.get("status") == "completed"
         and finalization.get("mailbox_accepted") == 1

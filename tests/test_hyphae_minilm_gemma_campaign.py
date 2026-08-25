@@ -29,6 +29,9 @@ def test_unified_canary_pins_all_component_identities() -> None:
     assert module.BUNDLE_SHA256 == (
         "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
     )
+    assert module.REZERO_BUNDLE_SHA256 == (
+        "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121"
+    )
 
 
 def test_unified_canary_uses_real_components_and_safe_cleanup() -> None:
@@ -40,3 +43,5 @@ def test_unified_canary_uses_real_components_and_safe_cleanup() -> None:
     assert "SupervisedFrozenGemmaRuntime" in source
     assert "SQLiteMailboxNotificationSink" in source
     assert "shutil.rmtree(arguments.work_root" in source
+    assert "inspect_rezero_deployment_bundle" in source
+    assert '"--controller-kind"' in source

@@ -17,10 +17,14 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from celiums_rezero.governed.deployment import inspect_deployment_bundle
+from celiums_rezero.governed.deployment import (
+    inspect_deployment_bundle,
+    inspect_rezero_deployment_bundle,
+)
 from celiums_rezero.governed.gemma4 import Gemma4E4BFrozenBackbone
 from celiums_rezero.governed.runtime import (
     QUOTED_RUNTIME_VERSION,
+    REZERO_QUOTED_RUNTIME_VERSION,
     quoted_runtime_manifest_sha256,
 )
 from celiums_rezero.knowledge import (
@@ -79,6 +83,7 @@ HYPHAE_BINARY_SHA256 = "a00ea0cfc502ad63d65c42357664f7664f8a8c482fbdeb24a4f5511f
 HYPHAE_WHEEL_SHA256 = "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb"
 COLLECTION_SHA256 = "181552f7f9666546db8f09b3e89be98e99f4c4e09be227f6d257da93029ea527"
 BUNDLE_SHA256 = "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
+REZERO_BUNDLE_SHA256 = "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121"
 QUERY = "what is the approved maintenance window?"
 BODY = b"Service policy: approved maintenance window is 02:00-04:00 UTC."
 GENERATION = "generation_unified_canary_v1"
@@ -155,6 +160,11 @@ def main() -> int:
     parser.add_argument("--minilm-model", type=Path, required=True)
     parser.add_argument("--gemma-model", type=Path, required=True)
     parser.add_argument("--bundle", type=Path, required=True)
+    parser.add_argument(
+        "--controller-kind",
+        choices=("governed-v3", "rezero-v4"),
+        default="governed-v3",
+    )
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--source-patch-sha256", required=True)
     parser.add_argument("--work-root", type=Path, required=True)
@@ -205,6 +215,16 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         r"[0-9a-f]{64}", arguments.source_patch_sha256
     ):
         raise ValueError("unified source identity is invalid")
+    bundle_sha256 = (
+        REZERO_BUNDLE_SHA256
+        if arguments.controller_kind == "rezero-v4"
+        else BUNDLE_SHA256
+    )
+    runtime_version = (
+        REZERO_QUOTED_RUNTIME_VERSION
+        if arguments.controller_kind == "rezero-v4"
+        else QUOTED_RUNTIME_VERSION
+    )
     identities = {
         "hyphae_archive_sha256": _require_digest(
             arguments.hyphae_archive, HYPHAE_ARCHIVE_SHA256
@@ -215,7 +235,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         "hyphae_wheel_sha256": _require_digest(
             arguments.hyphae_wheel, HYPHAE_WHEEL_SHA256
         ),
-        "bundle_sha256": _require_digest(arguments.bundle, BUNDLE_SHA256),
+        "bundle_sha256": _require_digest(arguments.bundle, bundle_sha256),
     }
     if arguments.hyphae_wheel.name != "hyphae_sdk-2.1.0-py3-none-any.whl":
         raise ValueError("unified Hyphae wheel coordinate is invalid")
@@ -231,7 +251,11 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
     embedder = MiniLML6V2EmbeddingProvider(arguments.minilm_model)
     minilm = minilm_l6_v2_preflight(arguments.minilm_model)
     _write_json(arguments.out / "minilm-preflight.json", minilm)
-    bundle_manifest = inspect_deployment_bundle(arguments.bundle)
+    bundle_manifest = (
+        inspect_rezero_deployment_bundle(arguments.bundle)
+        if arguments.controller_kind == "rezero-v4"
+        else inspect_deployment_bundle(arguments.bundle)
+    )
     artifact = SourceArtifact(
         tenant=TENANT,
         source_id="official_docs",
@@ -450,12 +474,14 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             encoding="ascii",
         )
         runtime_executable.chmod(0o500)
-        runtime_manifest = quoted_runtime_manifest_sha256(BUNDLE_SHA256)
+        runtime_manifest = quoted_runtime_manifest_sha256(
+            bundle_sha256, runtime_version=runtime_version
+        )
         runtime_identity = FrozenModelIdentity(
             Gemma4E4BFrozenBackbone.model_id,
             Gemma4E4BFrozenBackbone.revision,
             runtime_manifest,
-            QUOTED_RUNTIME_VERSION,
+            runtime_version,
         )
         runtime = RecordingRuntime(
             SupervisedFrozenGemmaRuntime(
@@ -469,9 +495,11 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
                         "--bundle",
                         str(arguments.bundle),
                         "--bundle-sha256",
-                        BUNDLE_SHA256,
+                        bundle_sha256,
                         "--runtime-manifest-sha256",
                         runtime_manifest,
+                        "--controller-kind",
+                        arguments.controller_kind,
                         "--device",
                         "cuda:0",
                     ),
@@ -571,7 +599,8 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             "runtime": {
                 "model_revision": runtime_identity.revision,
                 "bundle_id": bundle_manifest.bundle_id,
-                "bundle_sha256": BUNDLE_SHA256,
+                "bundle_sha256": bundle_sha256,
+                "controller_kind": arguments.controller_kind,
                 "runtime_manifest_sha256": runtime_manifest,
                 "request_count": 1,
                 "request_sha256": hashlib.sha256(runtime_exchange.request_payload).hexdigest(),

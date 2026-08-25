@@ -11,7 +11,10 @@ from typing import cast
 
 import torch
 
-from celiums_rezero.governed.deployment import load_deployment_bundle
+from celiums_rezero.governed.deployment import (
+    load_deployment_bundle,
+    load_rezero_deployment_bundle,
+)
 from celiums_rezero.governed.gemma4 import Gemma4E4BFrozenBackbone
 from celiums_rezero.governed.schemas import ControlAction
 from celiums_rezero.knowledge.model_runtime import REQUEST_SCHEMA, RESPONSE_SCHEMA
@@ -25,6 +28,7 @@ from celiums_rezero.knowledge.schemas import (
 from celiums_rezero.lab.serialization import canonical_json
 
 QUOTED_RUNTIME_VERSION = "gemma4-e4b-control-v3-quoted-v1"
+REZERO_QUOTED_RUNTIME_VERSION = "gemma4-e4b-rezero-control-v4-quoted-v1"
 
 
 def main() -> int:
@@ -33,12 +37,27 @@ def main() -> int:
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--bundle-sha256", required=True)
     parser.add_argument("--runtime-manifest-sha256", required=True)
+    parser.add_argument(
+        "--controller-kind",
+        choices=("governed-v3", "rezero-v4"),
+        default="governed-v3",
+    )
     parser.add_argument("--device", default="cuda:0")
     arguments = parser.parse_args()
     request = _request(sys.stdin.buffer.read(1_000_001))
     device = torch.device(arguments.device)
     backbone = Gemma4E4BFrozenBackbone(arguments.model, device=arguments.device)
-    controller = load_deployment_bundle(
+    loader = (
+        load_rezero_deployment_bundle
+        if arguments.controller_kind == "rezero-v4"
+        else load_deployment_bundle
+    )
+    runtime_version = (
+        REZERO_QUOTED_RUNTIME_VERSION
+        if arguments.controller_kind == "rezero-v4"
+        else QUOTED_RUNTIME_VERSION
+    )
+    controller = loader(
         arguments.bundle,
         expected_bundle_sha256=arguments.bundle_sha256,
         backbone=backbone,
@@ -47,8 +66,10 @@ def main() -> int:
     expected_identity = FrozenModelIdentity(
         backbone.model_id,
         backbone.revision,
-        quoted_runtime_manifest_sha256(arguments.bundle_sha256),
-        QUOTED_RUNTIME_VERSION,
+        quoted_runtime_manifest_sha256(
+            arguments.bundle_sha256, runtime_version=runtime_version
+        ),
+        runtime_version,
     )
     if expected_identity.manifest_digest != arguments.runtime_manifest_sha256:
         raise ValueError("runtime manifest does not match loaded artifact identities")
@@ -162,7 +183,9 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return value
 
 
-def quoted_runtime_manifest_sha256(bundle_sha256: str) -> str:
+def quoted_runtime_manifest_sha256(
+    bundle_sha256: str, *, runtime_version: str = QUOTED_RUNTIME_VERSION
+) -> str:
     if len(bundle_sha256) != 64 or any(
         character not in "0123456789abcdef" for character in bundle_sha256
     ):
@@ -177,7 +200,7 @@ def quoted_runtime_manifest_sha256(bundle_sha256: str) -> str:
                     Gemma4E4BFrozenBackbone.artifact_manifest_digest()
                 ),
                 "bundle_sha256": bundle_sha256,
-                "runtime_version": QUOTED_RUNTIME_VERSION,
+                "runtime_version": runtime_version,
                 "response_schema": RESPONSE_SCHEMA,
             }
         ).encode()
