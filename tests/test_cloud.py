@@ -505,6 +505,21 @@ def test_gemma_rezero_training_plan_is_strict(tmp_path: Path) -> None:
     assert (cloud_plan.artifact_directory / "rezero-sequence-report.json").is_file()
 
 
+def test_gemma_rezero_v2_training_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_rezero_v2_training_plan(tmp_path)
+    runner = FakeRunner(rezero_training=True)
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "train_gemma4_e4b_rezero_control.py" in command[-1]
+    )
+    assert "gemma4_e4b_rezero_sequence_control_v2.json" in campaign
+
+
 def test_gemma_shadow_plan_is_strict(tmp_path: Path) -> None:
     cloud_plan = gemma_shadow_plan(tmp_path)
     runner = FakeRunner()
@@ -924,5 +939,22 @@ def gemma_rezero_shadow_plan(tmp_path: Path) -> CloudCampaignPlan:
             "10da3a479058cc94967f510fcbf979af759cf9ca11e18bec1209312606dfe670",
         ),
         artifact_directory=tmp_path / "artifacts-rezero-shadow",
+    )
+    return CloudCampaignPlan(**values)
+
+
+def gemma_rezero_v2_training_plan(tmp_path: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(gemma_rezero_training_plan(tmp_path), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-e4b-rezero-control-v2-x1",
+        campaign_command=(
+            "train-gemma4-e4b-rezero-v2",
+            "--feature-batch-size",
+            "8",
+        ),
+        artifact_directory=tmp_path / "artifacts-rezero-training-v2",
     )
     return CloudCampaignPlan(**values)

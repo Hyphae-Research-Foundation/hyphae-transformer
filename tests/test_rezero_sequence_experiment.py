@@ -163,6 +163,21 @@ def test_fixture_experiment_rejects_preregistration_drift(tmp_path: Path) -> Non
         )
 
 
+def test_v2_preregistration_uses_policy_certificate_without_shadow_data() -> None:
+    value = json.loads(
+        (
+            ROOT
+            / "experiments"
+            / "canonical"
+            / "gemma4_e4b_rezero_sequence_control_v2.json"
+        ).read_text()
+    )
+    assert value["candidate"]["host_control_contract"] == "host-policy-certificate-v2"
+    assert value["candidate"]["action_policy_prior_scale"] == 20.0
+    assert "shadow cases" in value["scope"].lower()
+    assert value["structural_gates"]["host_policy_certificate_size"] == 17
+
+
 def test_rezero_smoke_uses_active_device_for_rocm_memory_stats() -> None:
     source = (ROOT / "scripts" / "smoke_gemma4_e4b_rezero_control.py").read_text()
     experiment = (

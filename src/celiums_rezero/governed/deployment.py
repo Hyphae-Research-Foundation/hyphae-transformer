@@ -15,6 +15,11 @@ from typing import Protocol, cast
 import torch
 
 from celiums_rezero.governed.backbone import FrozenTextBackbone, validate_frozen_features
+from celiums_rezero.governed.data import (
+    HOST_CONTROL_SIZES,
+    HOST_CONTROL_V1,
+    host_control_values,
+)
 from celiums_rezero.governed.model import (
     GovernedControlHead,
     ReZeroSequenceControlHead,
@@ -26,6 +31,7 @@ from celiums_rezero.knowledge.schemas import (
     EvidenceBundle,
     EvidenceHit,
     SufficiencyDecision,
+    SufficiencyPolicy,
 )
 from celiums_rezero.lab.serialization import canonical_json
 
@@ -81,6 +87,8 @@ class ReZeroDeploymentBundleManifest:
     heads: int
     residual_strategy: str
     gate_init: float
+    host_control_contract: str
+    action_policy_prior_scale: float
     pointer_policy_score: float
     pointer_policy_scale: float
     pointer_threshold: float
@@ -290,6 +298,8 @@ def build_rezero_deployment_bundle(
         heads=int(candidate["n_heads"]),
         residual_strategy=str(candidate["residual_strategy"]),
         gate_init=float(candidate["gate_init"]),
+        host_control_contract=str(candidate.get("host_control_contract", HOST_CONTROL_V1)),
+        action_policy_prior_scale=float(candidate.get("action_policy_prior_scale", 0.0)),
         pointer_policy_score=float(training["pointer_policy_score"]),
         pointer_policy_scale=float(training["pointer_policy_scale"]),
         pointer_threshold=float(training["pointer_threshold"]),
@@ -380,6 +390,8 @@ def load_rezero_deployment_bundle(
         n_heads=manifest.heads,
         pointer_policy_score=manifest.pointer_policy_score,
         pointer_policy_scale=manifest.pointer_policy_scale,
+        host_control_size=HOST_CONTROL_SIZES[manifest.host_control_contract],
+        action_policy_prior_scale=manifest.action_policy_prior_scale,
         maximum_evidence_items=manifest.maximum_evidence_items,
     ).to(device)
     head.load_state_dict(checkpoint["head"], strict=True)
@@ -512,14 +524,13 @@ class GovernedShadowController:
             scores[0, : len(ordered)] = torch.tensor(
                 [hit.score for hit in ordered], dtype=torch.float32, device=self.device
             )
+        contract = (
+            self.manifest.host_control_contract
+            if isinstance(self.manifest, ReZeroDeploymentBundleManifest)
+            else HOST_CONTROL_V1
+        )
         host = torch.tensor(
-            [[
-                float(evidence.blocked),
-                float(evidence.conflicting),
-                float(not ordered),
-                max((hit.score for hit in ordered), default=0.0),
-                float(len(ordered)),
-            ]],
+            [host_control_values(evidence, SufficiencyPolicy(), contract)],
             dtype=torch.float32,
             device=self.device,
         )
@@ -667,13 +678,20 @@ def _rezero_manifest(value: object) -> ReZeroDeploymentBundleManifest:
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, list):
         raise ValueError("ReZero deployment artifact manifest is invalid")
+    values = dict(value)
+    legacy = "host_control_contract" not in values and "action_policy_prior_scale" not in values
+    values.setdefault("host_control_contract", HOST_CONTROL_V1)
+    values.setdefault("action_policy_prior_scale", 0.0)
     manifest = ReZeroDeploymentBundleManifest(
-        **{key: item for key, item in value.items() if key not in {"artifacts", "action_order"}},
-        action_order=tuple(cast(list[str], value["action_order"])),
+        **{key: item for key, item in values.items() if key not in {"artifacts", "action_order"}},
+        action_order=tuple(cast(list[str], values["action_order"])),
         artifacts=tuple(ArtifactDigest(**item) for item in artifacts),
     )
     identity = _rezero_manifest_dict(manifest)
     identity.pop("bundle_id")
+    if legacy:
+        identity.pop("host_control_contract")
+        identity.pop("action_policy_prior_scale")
     expected = f"rzcb_{hashlib.sha256(canonical_json(identity).encode()).hexdigest()}"
     if (
         manifest.schema != REZERO_BUNDLE_SCHEMA
@@ -681,6 +699,7 @@ def _rezero_manifest(value: object) -> ReZeroDeploymentBundleManifest:
         or manifest.residual_strategy != "rezero_rms_shared"
         or manifest.gate_init != 0
         or manifest.action_order != ACTION_ORDER
+        or manifest.host_control_contract not in HOST_CONTROL_SIZES
     ):
         raise ValueError("ReZero deployment bundle identity is invalid")
     return manifest

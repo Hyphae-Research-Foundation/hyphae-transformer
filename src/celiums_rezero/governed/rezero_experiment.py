@@ -17,6 +17,8 @@ from celiums_rezero.core.gates import is_gate_parameter
 from celiums_rezero.core.optim import build_optimizer_groups
 from celiums_rezero.governed.backbone import FrozenTextBackbone
 from celiums_rezero.governed.data import (
+    HOST_CONTROL_SIZES,
+    HOST_CONTROL_V1,
     GovernedBatch,
     load_governed_dataset,
     materialize_governed_batch,
@@ -81,6 +83,7 @@ def run_rezero_sequence_experiment(
         raise ValueError("feature batch size must be positive")
     training = preregistration["training_search"]
     candidate = preregistration["candidate"]
+    host_control_contract = str(candidate.get("host_control_contract", HOST_CONTROL_V1))
     gates = preregistration["gates"]
     seeds = tuple(int(value) for value in training["seeds"])
     learning_rates = tuple(float(value) for value in training["candidate_learning_rates"])
@@ -95,6 +98,8 @@ def run_rezero_sequence_experiment(
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             feature_batch_size=feature_batch_size,
             device=device,
+            host_control_contract=host_control_contract,
+            policy=dataset.manifest.policy,
         ),
         "validation": materialize_governed_batch(
             dataset.validation,
@@ -102,6 +107,8 @@ def run_rezero_sequence_experiment(
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             feature_batch_size=feature_batch_size,
             device=device,
+            host_control_contract=host_control_contract,
+            policy=dataset.manifest.policy,
         ),
     }
     _require_unchanged(backbone, backbone_before)
@@ -166,6 +173,8 @@ def run_rezero_sequence_experiment(
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             feature_batch_size=feature_batch_size,
             device=device,
+            host_control_contract=host_control_contract,
+            policy=dataset.manifest.policy,
         ),
         "adversarial": materialize_governed_batch(
             dataset.adversarial,
@@ -173,6 +182,8 @@ def run_rezero_sequence_experiment(
             maximum_evidence_items=dataset.manifest.maximum_evidence_items,
             feature_batch_size=feature_batch_size,
             device=device,
+            host_control_contract=host_control_contract,
+            policy=dataset.manifest.policy,
         ),
     }
     final_reports: list[dict[str, object]] = []
@@ -255,6 +266,7 @@ def run_rezero_sequence_smoke(
         raise ValueError("ReZero smoke limits are invalid")
     training = preregistration["training_search"]
     candidate = preregistration["candidate"]
+    host_control_contract = str(candidate.get("host_control_contract", HOST_CONTROL_V1))
     backbone_before = backbone.state_fingerprint()
     records = dataset.train[:feature_batch_size]
     batch = materialize_governed_batch(
@@ -263,6 +275,8 @@ def run_rezero_sequence_smoke(
         maximum_evidence_items=dataset.manifest.maximum_evidence_items,
         feature_batch_size=feature_batch_size,
         device=device,
+        host_control_contract=host_control_contract,
+        policy=dataset.manifest.policy,
     )
     _require_unchanged(backbone, backbone_before)
     torch.manual_seed(int(training["seeds"][0]))
@@ -352,6 +366,10 @@ def _new_head(
         n_heads=int(candidate["n_heads"]),
         pointer_policy_score=float(training["pointer_policy_score"]),
         pointer_policy_scale=float(training["pointer_policy_scale"]),
+        host_control_size=HOST_CONTROL_SIZES[
+            str(candidate.get("host_control_contract", HOST_CONTROL_V1))
+        ],
+        action_policy_prior_scale=float(candidate.get("action_policy_prior_scale", 0.0)),
         maximum_evidence_items=int(candidate["maximum_evidence_items"]),
     ).to(device)
     gates = [parameter for parameter in head.parameters() if is_gate_parameter(parameter)]
@@ -451,10 +469,12 @@ def _validate_preregistration(
     ):
         raise ValueError("Gemma backbone preregistration is invalid")
     candidate = preregistration["candidate"]
+    host_contract = str(candidate.get("host_control_contract", HOST_CONTROL_V1))
     if (
         candidate["residual_strategy"] != "rezero_rms_shared"
         or candidate["sequence"] != "context_then_content_digest_ordered_evidence"
         or candidate["maximum_evidence_items"] != dataset.manifest.maximum_evidence_items
+        or host_contract not in HOST_CONTROL_SIZES
     ):
         raise ValueError("ReZero sequence candidate differs from its protocol")
     training = preregistration["training_search"]

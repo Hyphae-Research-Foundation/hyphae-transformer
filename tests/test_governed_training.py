@@ -17,7 +17,12 @@ from celiums_rezero.governed import (
     TrajectoryStep,
     train_control_head,
 )
-from celiums_rezero.governed.data import load_trajectory_split, materialize_governed_batch
+from celiums_rezero.governed.data import (
+    HOST_CONTROL_V2,
+    host_control_values,
+    load_trajectory_split,
+    materialize_governed_batch,
+)
 from celiums_rezero.governed.evaluation import evaluate_control_head
 from celiums_rezero.knowledge.schemas import EvidenceHit, SufficiencyPolicy
 from celiums_rezero.lab.serialization import canonical_json
@@ -307,3 +312,46 @@ def test_rezero_sequence_controller_trains_with_frozen_backbone(tmp_path: Path) 
     }
     assert weight_decays == {0.0, 0.01}
     assert sum(parameter.numel() for parameter in head.parameters()) < 5_000_000
+
+
+def test_host_policy_certificate_exposes_sufficiency_without_shadow_labels() -> None:
+    policy = SufficiencyPolicy()
+    supported = records()[0]
+    from celiums_rezero.knowledge.schemas import EvidenceBundle, TenantId
+
+    bundle = EvidenceBundle(
+        TenantId("tenant_a"),
+        "0" * 64,
+        supported.generation_id,
+        supported.evidence,
+    )
+    values = host_control_values(bundle, policy, HOST_CONTROL_V2)
+    assert len(values) == 17
+    assert values[-5:] == (1.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_rezero_action_policy_prior_maps_certified_decisions() -> None:
+    head = ReZeroSequenceControlHead(
+        8,
+        control_size=16,
+        n_layers=1,
+        n_heads=4,
+        host_control_size=17,
+        action_policy_prior_scale=20,
+        maximum_evidence_items=2,
+    )
+    with torch.no_grad():
+        head.action.weight.zero_()
+        head.action.bias.zero_()
+    base = torch.zeros((3, 17))
+    base[0, -5] = 1
+    base[1, -3] = 1
+    base[2, -1] = 1
+    logits = head(
+        torch.ones((3, 8)),
+        torch.ones((3, 2, 8)),
+        torch.tensor([[True, False], [False, False], [False, False]]),
+        torch.tensor([[0.95, 0.0], [0.0, 0.0], [0.0, 0.0]]),
+        base,
+    )
+    assert logits.action_logits.argmax(-1).tolist() == [0, 1, 2]

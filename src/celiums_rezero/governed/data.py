@@ -18,7 +18,13 @@ from celiums_rezero.governed.schemas import (
     GovernedDatasetManifest,
     TrajectoryStep,
 )
-from celiums_rezero.knowledge.schemas import EvidenceHit, SufficiencyPolicy
+from celiums_rezero.knowledge.schemas import (
+    EvidenceBundle,
+    EvidenceHit,
+    SufficiencyDecision,
+    SufficiencyPolicy,
+    TenantId,
+)
 from celiums_rezero.lab.serialization import canonical_json
 
 
@@ -31,6 +37,11 @@ class GovernedBatch:
     evidence_mask: torch.Tensor
     action_targets: torch.Tensor
     pointer_targets: torch.Tensor
+
+
+HOST_CONTROL_V1 = "host-policy-summary-v1"
+HOST_CONTROL_V2 = "host-policy-certificate-v2"
+HOST_CONTROL_SIZES = {HOST_CONTROL_V1: 5, HOST_CONTROL_V2: 17}
 
 
 def load_trajectory_split(path: Path, policy: SufficiencyPolicy) -> tuple[TrajectoryStep, ...]:
@@ -118,6 +129,8 @@ def make_batch(
     *,
     maximum_evidence_items: int,
     device: torch.device,
+    host_control_contract: str = HOST_CONTROL_V1,
+    policy: SufficiencyPolicy | None = None,
 ) -> GovernedBatch:
     if not records:
         raise ValueError("governed batch cannot be empty")
@@ -164,14 +177,11 @@ def make_batch(
     )
     pointers = torch.zeros_like(mask, dtype=torch.float32)
     actions = torch.empty(len(records), dtype=torch.long, device=device)
+    selected_policy = SufficiencyPolicy() if policy is None else policy
     host_control = torch.tensor(
         [
-            (
-                float(record.blocked),
-                float(record.conflicting),
-                float(len(items) == 0),
-                max((hit.score for hit in items), default=0.0),
-                float(len(items)),
+            host_control_values(
+                _record_bundle(record, items), selected_policy, host_control_contract
             )
             for record, items in zip(records, ordered_evidence, strict=True)
         ],
@@ -214,6 +224,8 @@ def materialize_governed_batch(
     maximum_evidence_items: int,
     feature_batch_size: int,
     device: torch.device,
+    host_control_contract: str = HOST_CONTROL_V1,
+    policy: SufficiencyPolicy | None = None,
 ) -> GovernedBatch:
     if feature_batch_size < 1:
         raise ValueError("feature batch size must be positive")
@@ -223,6 +235,8 @@ def materialize_governed_batch(
             backbone,
             maximum_evidence_items=maximum_evidence_items,
             device=device,
+            host_control_contract=host_control_contract,
+            policy=policy,
         )
         for start in range(0, len(records), feature_batch_size)
     )
@@ -238,6 +252,64 @@ def materialize_governed_batch(
         evidence_mask=torch.cat(tuple(batch.evidence_mask for batch in batches)),
         action_targets=torch.cat(tuple(batch.action_targets for batch in batches)),
         pointer_targets=torch.cat(tuple(batch.pointer_targets for batch in batches)),
+    )
+
+
+def host_control_values(
+    bundle: EvidenceBundle,
+    policy: SufficiencyPolicy,
+    contract: str = HOST_CONTROL_V1,
+) -> tuple[float, ...]:
+    if contract not in HOST_CONTROL_SIZES:
+        raise ValueError("host control feature contract is invalid")
+    active = tuple(hit for hit in bundle.hits if hit.active and hit.trusted)
+    scores = sorted((hit.score for hit in active), reverse=True)
+    top = scores[0] if scores else 0.0
+    second = scores[1] if len(scores) > 1 else 0.0
+    base = (
+        float(bundle.blocked),
+        float(bundle.conflicting),
+        float(not active),
+        top,
+        float(len(active)),
+    )
+    if contract == HOST_CONTROL_V1:
+        return base
+    decision = policy.decide(bundle)
+    decision_order = (
+        SufficiencyDecision.SUPPORTED,
+        SufficiencyDecision.PARTIAL,
+        SufficiencyDecision.ABSENT,
+        SufficiencyDecision.CONFLICT,
+        SufficiencyDecision.BLOCKED,
+    )
+    certificate = (
+        float(bundle.approximate),
+        second,
+        top - second,
+        float(sum(score >= policy.minimum_score for score in scores)),
+        policy.minimum_score,
+        policy.minimum_margin,
+        float(policy.minimum_trusted_hits),
+        *(float(decision is item) for item in decision_order),
+    )
+    values = (*base, *certificate)
+    if len(values) != HOST_CONTROL_SIZES[contract]:
+        raise RuntimeError("host control feature contract size is invalid")
+    return values
+
+
+def _record_bundle(
+    record: TrajectoryStep, evidence: tuple[EvidenceHit, ...]
+) -> EvidenceBundle:
+    return EvidenceBundle(
+        tenant=TenantId("training_fixture"),
+        query_digest=hashlib.sha256(record.query.encode()).hexdigest(),
+        corpus_generation=record.generation_id,
+        hits=evidence,
+        approximate=record.approximate,
+        conflicting=record.conflicting,
+        blocked=record.blocked,
     )
 
 

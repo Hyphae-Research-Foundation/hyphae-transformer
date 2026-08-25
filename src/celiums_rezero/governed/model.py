@@ -92,6 +92,8 @@ class ReZeroSequenceControlHead(nn.Module):
         pointer_policy_score: float = 0.72,
         pointer_policy_scale: float = 20.0,
         use_host_control_features: bool = True,
+        host_control_size: int = 5,
+        action_policy_prior_scale: float = 0.0,
         maximum_evidence_items: int = 8,
     ) -> None:
         super().__init__()
@@ -103,6 +105,8 @@ class ReZeroSequenceControlHead(nn.Module):
         self.control_size = control_size
         self.maximum_evidence_items = maximum_evidence_items
         self.use_host_control_features = use_host_control_features
+        self.host_control_size = host_control_size
+        self.action_policy_prior_scale = action_policy_prior_scale
         self.pointer_policy_score = pointer_policy_score
         self.pointer_policy_scale = pointer_policy_scale
         config = ModelConfig(
@@ -119,7 +123,9 @@ class ReZeroSequenceControlHead(nn.Module):
         self.type_embedding = nn.Embedding(2, control_size)
         self.blocks = nn.ModuleList(TransformerBlock(config) for _ in range(n_layers))
         self.final_norm = RMSNorm(control_size, config.rms_norm_epsilon)
-        self.action = nn.Linear(control_size + (5 if use_host_control_features else 0), 3)
+        self.action = nn.Linear(
+            control_size + (host_control_size if use_host_control_features else 0), 3
+        )
         self.pointer = nn.Linear(control_size, 1, bias=False)
 
     def forward(
@@ -170,16 +176,34 @@ class ReZeroSequenceControlHead(nn.Module):
         if self.use_host_control_features:
             if host_control_features is None or host_control_features.shape != (
                 context_features.shape[0],
-                5,
+                self.host_control_size,
             ):
                 raise ValueError("host control features are required by this controller")
             action_features = torch.cat((action_features, host_control_features), dim=-1)
+        action_logits = self.action(action_features)
+        if self.action_policy_prior_scale:
+            if host_control_features is None or self.host_control_size < 5:
+                raise ValueError("action policy prior requires a host policy certificate")
+            certificate = host_control_features[:, -5:]
+            if not torch.allclose(
+                certificate.sum(-1), torch.ones(certificate.shape[0], device=certificate.device)
+            ):
+                raise ValueError("host policy decision certificate must be one-hot")
+            policy_actions = torch.stack(
+                (
+                    certificate[:, 0],
+                    certificate[:, 1] + certificate[:, 2],
+                    certificate[:, 3] + certificate[:, 4],
+                ),
+                dim=-1,
+            )
+            action_logits = action_logits + self.action_policy_prior_scale * policy_actions
         pointers = self.pointer(hidden[:, 1:]).squeeze(-1)
         pointers = pointers + self.pointer_policy_scale * (
             evidence_scores - self.pointer_policy_score
         )
         pointers = pointers.masked_fill(~evidence_mask, -torch.inf)
-        return ControlLogits(self.action(action_features), pointers)
+        return ControlLogits(action_logits, pointers)
 
 
 def decode_control(
