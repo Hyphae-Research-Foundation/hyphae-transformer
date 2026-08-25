@@ -1,0 +1,23 @@
+{
+  "bundle_id": "rzcb_18347c6eca826c4eea75aa78a8ddbbe69e7c2adfebe9921985ead9bc364a92ee",
+  "bundle_sha256": "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121",
+  "claim": "The bounded ReZero v4 controller completes one authenticated Hyphae publication, exact retrieval, quoted answer, durable finalization, mailbox replay, and cleanup chain.",
+  "controller_kind": "rezero-v4",
+  "gates": {
+    "decision": "answer",
+    "mailbox_accepted": 1,
+    "maximum_cost_usd": 2.25,
+    "request_count": 1,
+    "retrieval_approximate": false,
+    "retrieval_strategy": "exact_filtered",
+    "restart_replay": true
+  },
+  "hyphae": {
+    "binary_sha256": "a00ea0cfc502ad63d65c42357664f7664f8a8c482fbdeb24a4f5511feceb45d0",
+    "sdk_wheel_sha256": "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb",
+    "version": "2.1.0"
+  },
+  "minilm_manifest_sha256": "e5d9d07b6db0c99cc4a2afa92047d57b84c3cb6ed48137ad3612601fdbe21411",
+  "schema": "hyphae-transformer.hyphae-minilm-gemma-rezero-canary-preregistration/v1",
+  "scope": "One operator-owned text fixture; no autonomous navigation, tenant authority, or model-controlled publication."
+}
