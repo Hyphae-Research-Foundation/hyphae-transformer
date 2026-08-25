@@ -30,15 +30,22 @@ from celiums_rezero.governed.navigation import (
     NAVIGATION_ACTIONS,
     NavigationStep,
     action_labels,
+    calibrated_hits,
     evidence_for_step,
     expected_pointer_targets,
 )
 from celiums_rezero.governed.schemas import GovernedDataset
-from celiums_rezero.knowledge.schemas import EvidenceBundle, SufficiencyPolicy
+from celiums_rezero.knowledge.schemas import (
+    EvidenceBundle,
+    SufficiencyPolicy,
+    TenantId,
+)
 from celiums_rezero.lab.serialization import canonical_json
 
 SCHEMA = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v1"
+SCHEMA_V2 = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v2"
 POINTER_LOGIT_THRESHOLD = 0.5
+HYPHAE_210_SCORE_SCALE = 0.03278688524590164
 
 
 class NavigationTrainingSummary(TypedDict):
@@ -106,10 +113,17 @@ def build_navigation_batch(
     *,
     maximum_evidence_items: int,
     device: torch.device,
+    calibration_scale: float | None = None,
+    policy: SufficiencyPolicy | None = None,
 ) -> NavigationBatch:
     if not steps:
         raise ValueError("navigation batch cannot be empty")
     evidence_sets = tuple(evidence_for_step(step) for step in steps)
+    if calibration_scale is not None:
+        evidence_sets = tuple(
+            calibrated_hits(items, score_scale=calibration_scale, step_action=step.step_action)
+            for step, items in zip(steps, evidence_sets, strict=True)
+        )
     if any(len(items) > maximum_evidence_items for items in evidence_sets):
         raise ValueError("navigation evidence exceeds the configured item bound")
     context_texts = tuple(
@@ -141,9 +155,13 @@ def build_navigation_batch(
         else torch.empty((0, hidden), dtype=torch.float32, device=device)
     )
     validate_frozen_features(backbone, flattened_features, items=len(flattened))
-    host_control = torch.tensor(
-        [step.host_certificate for step in steps], dtype=torch.float32, device=device
+    certificates = tuple(
+        step.host_certificate
+        if calibration_scale is None
+        else _calibrated_certificate(step, score_scale=calibration_scale, policy=policy)
+        for step in steps
     )
+    host_control = torch.tensor(certificates, dtype=torch.float32, device=device)
     offset = 0
     for row, (step, items) in enumerate(zip(steps, evidence_sets, strict=True)):
         if items:
@@ -170,6 +188,8 @@ def train_navigation_pilot(
     checkpoint: Path,
     maximum_evidence_items: int,
     deadline: float | None = None,
+    calibration_scale: float | None = None,
+    policy: SufficiencyPolicy | None = None,
 ) -> tuple[float, float, float, int]:
     random.seed(config.seed)
     torch.manual_seed(config.seed)
@@ -199,6 +219,8 @@ def train_navigation_pilot(
         backbone,
         maximum_evidence_items=maximum_evidence_items,
         device=device,
+        calibration_scale=calibration_scale,
+        policy=policy,
     )
     losses: list[float] = []
     selected_state: dict[str, torch.Tensor] | None = None
@@ -267,9 +289,16 @@ def evaluate_navigation(
     maximum_evidence_items: int,
     device: torch.device,
     gates: dict[str, float],
+    calibration_scale: float | None = None,
+    policy: SufficiencyPolicy | None = None,
 ) -> NavigationEvaluation:
     batch = build_navigation_batch(
-        steps, backbone, maximum_evidence_items=maximum_evidence_items, device=device
+        steps,
+        backbone,
+        maximum_evidence_items=maximum_evidence_items,
+        device=device,
+        calibration_scale=calibration_scale,
+        policy=policy,
     )
     pilot.eval()
     with torch.no_grad():
@@ -434,6 +463,123 @@ def run_navigation_experiment(
     return report
 
 
+def run_navigation_experiment_v2(
+    *,
+    backbone: FrozenTextBackbone,
+    preregistration: dict[str, Any],
+    preregistration_sha256: str,
+    dataset: GovernedDataset,
+    trajectories: tuple[tuple[NavigationStep, ...], ...],
+    output: Path,
+    device: torch.device,
+    maximum_evidence_items: int,
+    calibration_scale: float,
+) -> dict[str, object]:
+    _validate_preregistration(preregistration, dataset)
+    if preregistration.get("schema") != (
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2"
+    ):
+        raise ValueError("navigation v2 preregistration schema is invalid")
+    policy = dataset.manifest.policy
+    search = preregistration["training_search"]
+    gates = preregistration["gates"]
+    seeds = tuple(int(value) for value in search["seeds"])
+    learning_rates = tuple(float(value) for value in search["candidate_learning_rates"])
+    action_labels(trajectories)
+    train_count = len(dataset.train)
+    validation_count = len(dataset.validation)
+    train_steps = tuple(step for trajectory in trajectories[:train_count] for step in trajectory)
+    validation_steps = tuple(
+        step
+        for trajectory in trajectories[train_count : train_count + validation_count]
+        for step in trajectory
+    )
+    output.mkdir(parents=True, exist_ok=True)
+    search_reports: list[dict[str, object]] = []
+    for learning_rate in learning_rates:
+        seed_reports: list[NavigationSeedReport] = []
+        for seed in seeds:
+            checkpoint = output / "search" / str(learning_rate) / f"seed-{seed}.pt"
+            pilot = _pilot_from_prereg(preregistration, backbone, maximum_evidence_items)
+            initial, selected, final, epoch = train_navigation_pilot(
+                backbone=backbone,
+                pilot=pilot,
+                train_steps=train_steps,
+                config=NavigationTrainConfig(
+                    epochs=int(search["epochs"]),
+                    learning_rate=learning_rate,
+                    evidence_loss_weight=float(search["evidence_loss_weight"]),
+                    gradient_clip=float(search["gradient_clip"]),
+                    seed=seed,
+                    device=str(device),
+                    optimizer=str(search["optimizer"]),
+                    weight_decay=float(search["weight_decay"]),
+                    checkpoint_selection=str(search["checkpoint_selection"]),
+                ),
+                checkpoint=checkpoint,
+                maximum_evidence_items=maximum_evidence_items,
+                calibration_scale=calibration_scale,
+                policy=policy,
+            )
+            validation = evaluate_navigation(
+                backbone=backbone,
+                pilot=pilot,
+                steps=validation_steps,
+                maximum_evidence_items=maximum_evidence_items,
+                device=device,
+                gates=gates,
+                calibration_scale=calibration_scale,
+                policy=policy,
+            )
+            seed_reports.append(
+                {
+                    "seed": seed,
+                    "training": {
+                        "initial_loss": initial,
+                        "selected_loss": selected,
+                        "final_loss": final,
+                        "selected_epoch": epoch,
+                        "checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+                    },
+                    "validation": validation,
+                }
+            )
+        search_reports.append(build_search_report(learning_rate, seed_reports))
+    selected_report = min(search_reports, key=_selection_key_value)
+    selected_rate = float(cast("float", selected_report["learning_rate"]))
+    final_reports: list[dict[str, object]] = []
+    for seed_report in cast("list[NavigationSeedReport]", selected_report["seeds"]):
+        final_reports.append(dict(seed_report))
+    report: dict[str, object] = {
+        "schema": SCHEMA_V2,
+        "completed": True,
+        "passed": all(
+            bool(cast("dict[str, object]", item["validation"])["passed"]) for item in final_reports
+        ),
+        "scope": "gemma",
+        "calibration": {
+            "scheme": "hyphae-2.1.0-exact-filtered-v1",
+            "score_scale": calibration_scale,
+        },
+        "backbone": {
+            "model_id": backbone.identity.model_id,
+            "revision": backbone.identity.revision,
+            "feature_contract": backbone.identity.feature_contract,
+        },
+        "backbone_unchanged": True,
+        "preregistration_sha256": preregistration_sha256,
+        "dataset_id": dataset.manifest.dataset_id,
+        "selected_learning_rate": selected_rate,
+        "search": search_reports,
+        "final": final_reports,
+    }
+    report["report_id"] = "rznp2_" + hashlib.sha256(canonical_json(report).encode()).hexdigest()
+    (output / "rezero-navigation-v2-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
+    return report
+
+
 @dataclass(frozen=True, slots=True)
 class NavigationDecision:
     action: str
@@ -571,6 +717,26 @@ def decide_navigation_step(
     )
 
 
+def _calibrated_certificate(
+    step: NavigationStep,
+    *,
+    score_scale: float,
+    policy: SufficiencyPolicy | None,
+) -> tuple[float, ...]:
+    hits = tuple(hit for hit in step.record.evidence if hit.active and hit.trusted)
+    calibrated = calibrated_hits(hits, score_scale=score_scale, step_action=step.step_action)
+    bundle = EvidenceBundle(
+        tenant=TenantId("training_fixture"),
+        query_digest=hashlib.sha256(step.record.query.encode()).hexdigest(),
+        corpus_generation=step.record.generation_id,
+        hits=calibrated,
+        approximate=step.record.approximate,
+        conflicting=step.record.conflicting,
+        blocked=step.record.blocked,
+    )
+    return host_control_values(bundle, policy or SufficiencyPolicy(), HOST_CONTROL_CONTRACT)
+
+
 def _pilot_from_prereg(
     preregistration: dict[str, Any],
     backbone: FrozenTextBackbone,
@@ -614,10 +780,10 @@ def _selection_key(rate: float, seed_reports: list[NavigationSeedReport]) -> tup
 
 
 def _validate_preregistration(preregistration: dict[str, Any], dataset: GovernedDataset) -> None:
-    if (
-        preregistration.get("schema")
-        != "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v1"
-    ):
+    if preregistration.get("schema") not in {
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v1",
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
+    }:
         raise ValueError("navigation preregistration schema is invalid")
     if preregistration["dataset"]["governed_dataset_id"] != dataset.manifest.dataset_id:
         raise ValueError("navigation dataset identity differs")

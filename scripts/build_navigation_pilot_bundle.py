@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--training-report", type=Path, required=True)
     parser.add_argument("--preregistration", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--version", choices=("v1", "v2"), default="v1")
     arguments = parser.parse_args()
     checkpoint = arguments.checkpoint.read_bytes()
     torch = __import__("torch")
@@ -34,10 +35,25 @@ def main() -> int:
         or hashlib.sha256(checkpoint).hexdigest() != seed_report["training"]["checkpoint_sha256"]
     ):
         raise SystemExit("navigation bundle requires the passing canonical seed")
+    expected_schema = (
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v2"
+        if arguments.version == "v2"
+        else "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v1"
+    )
+    if report.get("schema") != expected_schema:
+        raise SystemExit("navigation bundle report schema differs")
+    calibration = report.get("calibration", {})
+    if arguments.version == "v2" and (
+        calibration.get("scheme") != "hyphae-2.1.0-exact-filtered-v1"
+        or calibration.get("score_scale") != 0.03278688524590164
+    ):
+        raise SystemExit("navigation v2 bundle requires pinned calibration")
     manifest = {
-        "schema": "hyphae-transformer.rezero-navigation-pilot-bundle/v1",
+        "schema": f"hyphae-transformer.rezero-navigation-pilot-bundle/{arguments.version}",
         "backbone": payload,
         "selected_learning_rate": report["selected_learning_rate"],
+        "experiment_schema": expected_schema,
+        "calibration": calibration,
         "seed": 17,
         "artifacts": [
             {
