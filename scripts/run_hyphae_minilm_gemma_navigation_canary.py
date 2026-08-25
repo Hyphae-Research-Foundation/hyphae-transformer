@@ -325,17 +325,18 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         )
         if pending.job_id is None:
             raise RuntimeError("navigation job did not enqueue")
-        empty_certificate = _certificate((), policy)
+        empty_bundle = EvidenceBundle(
+            TENANT,
+            hashlib.sha256(normalize_query(QUERY).encode()).hexdigest(),
+            GENERATION,
+            (),
+        )
+        empty_certificate = _certificate(empty_bundle, policy)
         empty_decision = decide_navigation_step(
             backbone=backbone,
             pilot=pilot,
             query=QUERY,
-            evidence=EvidenceBundle(
-                TENANT,
-                hashlib.sha256(normalize_query(QUERY).encode()).hexdigest(),
-                GENERATION,
-                (),
-            ),
+            evidence=empty_bundle,
             policy=policy,
             search_steps_used=0,
             device=device,
