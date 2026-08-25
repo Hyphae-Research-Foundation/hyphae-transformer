@@ -89,6 +89,8 @@ class ReZeroDeploymentBundleManifest:
     gate_init: float
     host_control_contract: str
     action_policy_prior_scale: float
+    action_residual_bound: float | None
+    pointer_residual_bound: float | None
     pointer_policy_score: float
     pointer_policy_scale: float
     pointer_threshold: float
@@ -300,6 +302,16 @@ def build_rezero_deployment_bundle(
         gate_init=float(candidate["gate_init"]),
         host_control_contract=str(candidate.get("host_control_contract", HOST_CONTROL_V1)),
         action_policy_prior_scale=float(candidate.get("action_policy_prior_scale", 0.0)),
+        action_residual_bound=(
+            None
+            if candidate.get("action_residual_bound") is None
+            else float(candidate["action_residual_bound"])
+        ),
+        pointer_residual_bound=(
+            None
+            if candidate.get("pointer_residual_bound") is None
+            else float(candidate["pointer_residual_bound"])
+        ),
         pointer_policy_score=float(training["pointer_policy_score"]),
         pointer_policy_scale=float(training["pointer_policy_scale"]),
         pointer_threshold=float(training["pointer_threshold"]),
@@ -392,6 +404,8 @@ def load_rezero_deployment_bundle(
         pointer_policy_scale=manifest.pointer_policy_scale,
         host_control_size=HOST_CONTROL_SIZES[manifest.host_control_contract],
         action_policy_prior_scale=manifest.action_policy_prior_scale,
+        action_residual_bound=manifest.action_residual_bound,
+        pointer_residual_bound=manifest.pointer_residual_bound,
         maximum_evidence_items=manifest.maximum_evidence_items,
     ).to(device)
     head.load_state_dict(checkpoint["head"], strict=True)
@@ -679,9 +693,15 @@ def _rezero_manifest(value: object) -> ReZeroDeploymentBundleManifest:
     if not isinstance(artifacts, list):
         raise ValueError("ReZero deployment artifact manifest is invalid")
     values = dict(value)
-    legacy = "host_control_contract" not in values and "action_policy_prior_scale" not in values
-    values.setdefault("host_control_contract", HOST_CONTROL_V1)
-    values.setdefault("action_policy_prior_scale", 0.0)
+    optional_fields = {
+        "host_control_contract": HOST_CONTROL_V1,
+        "action_policy_prior_scale": 0.0,
+        "action_residual_bound": None,
+        "pointer_residual_bound": None,
+    }
+    missing_fields = {name for name in optional_fields if name not in values}
+    for name, default in optional_fields.items():
+        values.setdefault(name, default)
     manifest = ReZeroDeploymentBundleManifest(
         **{key: item for key, item in values.items() if key not in {"artifacts", "action_order"}},
         action_order=tuple(cast(list[str], values["action_order"])),
@@ -689,9 +709,8 @@ def _rezero_manifest(value: object) -> ReZeroDeploymentBundleManifest:
     )
     identity = _rezero_manifest_dict(manifest)
     identity.pop("bundle_id")
-    if legacy:
-        identity.pop("host_control_contract")
-        identity.pop("action_policy_prior_scale")
+    for name in missing_fields:
+        identity.pop(name)
     expected = f"rzcb_{hashlib.sha256(canonical_json(identity).encode()).hexdigest()}"
     if (
         manifest.schema != REZERO_BUNDLE_SCHEMA

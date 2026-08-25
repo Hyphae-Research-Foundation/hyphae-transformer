@@ -247,6 +247,7 @@ def test_rezero_bundle_is_deterministic_and_loadable(tmp_path: Path) -> None:
             {
                 "candidate": {
                     "action_policy_prior_scale": 0.0,
+                    "action_residual_bound": None,
                     "control_size": 32,
                     "layers": 1,
                     "n_heads": 4,
@@ -254,6 +255,7 @@ def test_rezero_bundle_is_deterministic_and_loadable(tmp_path: Path) -> None:
                     "residual_strategy": "rezero_rms_shared",
                     "gate_init": 0.0,
                     "host_control_contract": "host-policy-summary-v1",
+                    "pointer_residual_bound": None,
                 },
                 "dataset": {"governed_dataset_id": "gtd_fixture"},
                 "training_search": {
@@ -341,6 +343,8 @@ def test_rezero_bundle_is_deterministic_and_loadable(tmp_path: Path) -> None:
     legacy_manifest = json.loads(files["manifest.json"])
     legacy_manifest.pop("host_control_contract")
     legacy_manifest.pop("action_policy_prior_scale")
+    legacy_manifest.pop("action_residual_bound")
+    legacy_manifest.pop("pointer_residual_bound")
     legacy_identity = dict(legacy_manifest)
     legacy_identity.pop("bundle_id")
     legacy_manifest["bundle_id"] = "rzcb_" + hashlib.sha256(
