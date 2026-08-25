@@ -355,3 +355,32 @@ def test_rezero_action_policy_prior_maps_certified_decisions() -> None:
         base,
     )
     assert logits.action_logits.argmax(-1).tolist() == [0, 1, 2]
+
+
+def test_bounded_policy_certificates_cannot_be_reversed() -> None:
+    head = ReZeroSequenceControlHead(
+        8,
+        control_size=16,
+        n_layers=1,
+        n_heads=4,
+        host_control_size=17,
+        action_policy_prior_scale=20,
+        action_residual_bound=1,
+        pointer_residual_bound=1,
+        maximum_evidence_items=2,
+    )
+    with torch.no_grad():
+        head.action.weight.fill_(-1000)
+        head.action.bias.fill_(-1000)
+        head.pointer.weight.fill_(-1000)
+    certificate = torch.zeros((1, 17))
+    certificate[0, -5] = 1
+    logits = head(
+        torch.ones((1, 8)),
+        torch.ones((1, 2, 8)),
+        torch.tensor([[True, True]]),
+        torch.tensor([[0.95, 0.4]]),
+        certificate,
+    )
+    assert logits.action_logits.argmax(-1).item() == 0
+    assert (logits.evidence_logits >= 0).tolist() == [[True, False]]

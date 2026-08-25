@@ -131,3 +131,9 @@ in another answer. The result is preserved in
 [`experiments/results/gemma4_e4b_rezero_shadow_external_v2.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v2.json).
 The next protocol will certify support per evidence item and bound the semantic pointer
 residual so it cannot reverse that host validation.
+
+The v3 protocol bounds learned action and pointer residuals to `[-1, 1]` while host
+certificates contribute magnitude 20. Therefore learned semantics can rank within a
+certified class but cannot reverse action or evidence-support signs. The prospective
+protocol is
+[`experiments/canonical/gemma4_e4b_rezero_sequence_control_v3.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v3.json).

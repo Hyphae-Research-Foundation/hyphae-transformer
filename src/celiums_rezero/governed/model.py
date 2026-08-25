@@ -94,6 +94,8 @@ class ReZeroSequenceControlHead(nn.Module):
         use_host_control_features: bool = True,
         host_control_size: int = 5,
         action_policy_prior_scale: float = 0.0,
+        action_residual_bound: float | None = None,
+        pointer_residual_bound: float | None = None,
         maximum_evidence_items: int = 8,
     ) -> None:
         super().__init__()
@@ -107,6 +109,12 @@ class ReZeroSequenceControlHead(nn.Module):
         self.use_host_control_features = use_host_control_features
         self.host_control_size = host_control_size
         self.action_policy_prior_scale = action_policy_prior_scale
+        self.action_residual_bound = action_residual_bound
+        self.pointer_residual_bound = pointer_residual_bound
+        if action_residual_bound is not None and action_residual_bound <= 0:
+            raise ValueError("action residual bound must be positive")
+        if pointer_residual_bound is not None and pointer_residual_bound <= 0:
+            raise ValueError("pointer residual bound must be positive")
         self.pointer_policy_score = pointer_policy_score
         self.pointer_policy_scale = pointer_policy_scale
         config = ModelConfig(
@@ -181,6 +189,8 @@ class ReZeroSequenceControlHead(nn.Module):
                 raise ValueError("host control features are required by this controller")
             action_features = torch.cat((action_features, host_control_features), dim=-1)
         action_logits = self.action(action_features)
+        if self.action_residual_bound is not None:
+            action_logits = self.action_residual_bound * torch.tanh(action_logits)
         if self.action_policy_prior_scale:
             if host_control_features is None or self.host_control_size < 5:
                 raise ValueError("action policy prior requires a host policy certificate")
@@ -199,9 +209,18 @@ class ReZeroSequenceControlHead(nn.Module):
             )
             action_logits = action_logits + self.action_policy_prior_scale * policy_actions
         pointers = self.pointer(hidden[:, 1:]).squeeze(-1)
-        pointers = pointers + self.pointer_policy_scale * (
-            evidence_scores - self.pointer_policy_score
-        )
+        if self.pointer_residual_bound is None:
+            pointers = pointers + self.pointer_policy_scale * (
+                evidence_scores - self.pointer_policy_score
+            )
+        else:
+            pointers = self.pointer_residual_bound * torch.tanh(pointers)
+            support = torch.where(
+                evidence_scores >= self.pointer_policy_score,
+                torch.ones_like(evidence_scores),
+                -torch.ones_like(evidence_scores),
+            )
+            pointers = pointers + self.pointer_policy_scale * support
         pointers = pointers.masked_fill(~evidence_mask, -torch.inf)
         return ControlLogits(action_logits, pointers)
 

@@ -370,6 +370,16 @@ def _new_head(
             str(candidate.get("host_control_contract", HOST_CONTROL_V1))
         ],
         action_policy_prior_scale=float(candidate.get("action_policy_prior_scale", 0.0)),
+        action_residual_bound=(
+            None
+            if candidate.get("action_residual_bound") is None
+            else float(candidate["action_residual_bound"])
+        ),
+        pointer_residual_bound=(
+            None
+            if candidate.get("pointer_residual_bound") is None
+            else float(candidate["pointer_residual_bound"])
+        ),
         maximum_evidence_items=int(candidate["maximum_evidence_items"]),
     ).to(device)
     gates = [parameter for parameter in head.parameters() if is_gate_parameter(parameter)]
