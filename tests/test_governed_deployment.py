@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,7 @@ from celiums_rezero.knowledge.schemas import (
     SufficiencyDecision,
     TenantId,
 )
+from celiums_rezero.lab.serialization import canonical_json
 
 
 def test_bundle_build_load_and_shadow_observation(tmp_path: Path) -> None:
@@ -244,12 +246,14 @@ def test_rezero_bundle_is_deterministic_and_loadable(tmp_path: Path) -> None:
         json.dumps(
             {
                 "candidate": {
+                    "action_policy_prior_scale": 0.0,
                     "control_size": 32,
                     "layers": 1,
                     "n_heads": 4,
                     "maximum_evidence_items": 8,
                     "residual_strategy": "rezero_rms_shared",
                     "gate_init": 0.0,
+                    "host_control_contract": "host-policy-summary-v1",
                 },
                 "dataset": {"governed_dataset_id": "gtd_fixture"},
                 "training_search": {
@@ -328,3 +332,22 @@ def test_rezero_bundle_is_deterministic_and_loadable(tmp_path: Path) -> None:
         host_decision=SufficiencyDecision.ABSENT,
     )
     assert result.selected_handles == ()
+
+    with tarfile.open(bundle, "r:gz") as archive:
+        files = {
+            member.name: archive.extractfile(member).read()  # type: ignore[union-attr]
+            for member in archive.getmembers()
+        }
+    legacy_manifest = json.loads(files["manifest.json"])
+    legacy_manifest.pop("host_control_contract")
+    legacy_manifest.pop("action_policy_prior_scale")
+    legacy_identity = dict(legacy_manifest)
+    legacy_identity.pop("bundle_id")
+    legacy_manifest["bundle_id"] = "rzcb_" + hashlib.sha256(
+        canonical_json(legacy_identity).encode()
+    ).hexdigest()
+    from celiums_rezero.governed.deployment import _rezero_manifest
+
+    restored = _rezero_manifest(legacy_manifest)
+    assert restored.host_control_contract == "host-policy-summary-v1"
+    assert restored.action_policy_prior_scale == 0.0

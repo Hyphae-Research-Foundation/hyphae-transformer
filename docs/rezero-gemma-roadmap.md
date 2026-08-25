@@ -109,3 +109,13 @@ The negative result is preserved in
 The candidate is not promoted to a host-affecting runtime or navigation. The next
 experiment must address external supported-case generalization using train and
 validation data only; relaxing the shadow gates after observation is not permitted.
+
+The v2 hypothesis addresses the missing information directly. The model will receive a
+host-owned 17-value sufficiency certificate containing the policy thresholds, top and
+second retrieval scores, score margin, count above threshold, approximation state, and
+the one-hot result of `SufficiencyPolicy.decide`. A fixed action prior maps `supported`
+to `answer`, partial/absent to `request_evidence`, and conflict/blocked to `abstain`;
+the learned ReZero path remains a residual correction. These values are computed from
+the ordinary request and root-owned policy, not from shadow labels. The prospective
+protocol is
+[`experiments/canonical/gemma4_e4b_rezero_sequence_control_v2.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v2.json).

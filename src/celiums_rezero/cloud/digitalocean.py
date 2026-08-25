@@ -115,6 +115,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-v2",
             "train-gemma4-e4b-v3",
             "train-gemma4-e4b-rezero-v1",
+            "train-gemma4-e4b-rezero-v2",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "shadow-gemma4-e4b-rezero-v1",
@@ -133,6 +134,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-v2",
                 "train-gemma4-e4b-v3",
                 "train-gemma4-e4b-rezero-v1",
+                "train-gemma4-e4b-rezero-v2",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "shadow-gemma4-e4b-rezero-v1",
@@ -164,6 +166,8 @@ class CloudCampaignPlan:
             _validate_gemma_v3_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-rezero-v1":
             _validate_gemma_rezero_training_command(self.campaign_command)
+        if self.campaign_command[0] == "train-gemma4-e4b-rezero-v2":
+            _validate_gemma_rezero_v2_training_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v1":
             _validate_gemma_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v2":
@@ -526,6 +530,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-v2",
         "train-gemma4-e4b-v3",
         "train-gemma4-e4b-rezero-v1",
+        "train-gemma4-e4b-rezero-v2",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "shadow-gemma4-e4b-rezero-v1",
@@ -562,7 +567,11 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/runs/gemma4-e4b-rezero-smoke.json",
                 *plan.campaign_command[1:],
             ]
-        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-v1":
+        elif plan.campaign_command[0] in {
+            "train-gemma4-e4b-rezero-v1",
+            "train-gemma4-e4b-rezero-v2",
+        }:
+            rezero_version = plan.campaign_command[0].rsplit("-", 1)[-1]
             command = [
                 "python",
                 "/workspace/scripts/train_gemma4_e4b_rezero_control.py",
@@ -573,7 +582,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "--preregistration",
                 (
                     "/workspace/experiments/canonical/"
-                    "gemma4_e4b_rezero_sequence_control_v1.json"
+                    f"gemma4_e4b_rezero_sequence_control_{rezero_version}.json"
                 ),
                 "--out",
                 "/runs",
@@ -951,7 +960,7 @@ def _write_retrieved_evidence(
             with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
                 report_name = (
                     "./rezero-sequence-report.json"
-                    if plan.campaign_command[0] == "train-gemma4-e4b-rezero-v1"
+                    if plan.campaign_command[0].startswith("train-gemma4-e4b-rezero-")
                     else "./training-report.json"
                 )
                 member = archive.getmember(report_name)
@@ -1005,7 +1014,7 @@ def _write_retrieved_evidence(
     if plan.campaign_command[0].startswith("train-gemma4-e4b"):
         report_name = (
             "rezero-sequence-report.json"
-            if plan.campaign_command[0] == "train-gemma4-e4b-rezero-v1"
+            if plan.campaign_command[0].startswith("train-gemma4-e4b-rezero-")
             else "training-report.json"
         )
         (plan.artifact_directory / report_name).write_text(
@@ -1326,6 +1335,15 @@ def _validate_gemma_rezero_training_command(command: tuple[str, ...]) -> None:
         "8",
     ):
         raise ValueError("Gemma E4B ReZero training command differs from preregistration")
+
+
+def _validate_gemma_rezero_v2_training_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "train-gemma4-e4b-rezero-v2",
+        "--feature-batch-size",
+        "8",
+    ):
+        raise ValueError("Gemma E4B ReZero v2 training command differs from preregistration")
 
 
 def _validate_gemma_shadow_command(command: tuple[str, ...]) -> None:
