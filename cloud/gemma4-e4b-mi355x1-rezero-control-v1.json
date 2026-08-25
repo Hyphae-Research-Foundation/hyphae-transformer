@@ -1,20 +1,20 @@
 {
   "accelerator": "amd-rocm",
-  "artifact_directory": "artifacts/gemma4-e4b-mi355x1-shadow-v2",
+  "artifact_directory": "artifacts/gemma4-e4b-mi355x1-rezero-control-v1",
   "campaign_command": [
-    "shadow-gemma4-e4b-v2",
-    "--bundle-sha256",
-    "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
+    "train-gemma4-e4b-rezero-v1",
+    "--feature-batch-size",
+    "8"
   ],
   "data_command": ["prepare-gemma4-e4b"],
   "hourly_rate_usd": 4.5,
   "image": "amddevelopercloud-pytorch2100rocm724",
-  "max_cost_usd": 9.0,
-  "max_lifetime_seconds": 7200,
-  "name": "hyphae-e4b-shadow-external-v2",
+  "max_cost_usd": 36.0,
+  "max_lifetime_seconds": 28800,
+  "name": "hyphae-e4b-rezero-control-v1-x1",
   "region": "mem1",
   "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
-  "revision": "c64f7861a8183333d5d53aa1567c6bb73080ade9",
+  "revision": "replace-with-merged-40-character-commit-sha",
   "size": "gpu-mi355x1-288gb-spot",
   "ssh_key_id": "55649085",
   "ssh_private_key": "/home/mario/.ssh/celiums-workers"

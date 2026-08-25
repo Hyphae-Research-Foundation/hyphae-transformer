@@ -1,0 +1,41 @@
+{
+  "analysis": {
+    "action_match_rate": 0.9166666666666666,
+    "conservative_downgrades": 1,
+    "mean_latency_ms": 56.818716583333334,
+    "operational_divergences": 0,
+    "p95_latency_ms": 75.371694,
+    "pointer_exact_match": 1.0,
+    "unsafe_upgrade_count": 0,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "archive_sha256": "22d66fe3154d1cf20da42f86ce448d5a6c3d27a90d4210aa34585d7b1618f417",
+    "audit_sha256": "2a2d7471ea70c24aec4367574fa7eb6d76166dce76273f80631a1bea6c618ccc",
+    "bundle_sha256": "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
+    "cases_sha256": "0f3796e7b2e3d43287a4ee80e51cc14ab0efafb4507a8f69708474efe3d2d031",
+    "report_sha256": "f726ce15e5990953faf4439ac26e82e5192c81ea5199b21f885c47b0ee730f02"
+  },
+  "campaign": {
+    "accelerator": "amd-mi355x-288gb",
+    "cases": 12,
+    "completed": true,
+    "created_at": "2026-08-24T04:44:54.688821+00:00",
+    "deleted_at": "2026-08-24T04:51:28.619434+00:00",
+    "droplet_id": 594691103,
+    "estimated_cost_usd": 0.49241326625,
+    "maximum_cost_usd": 9.0,
+    "source_revision": "c64f7861a8183333d5d53aa1567c6bb73080ade9",
+    "status": "completed",
+    "warmup_records": 1
+  },
+  "claim": "After explicit warm-up, the canonical v3 shadow controller has no unsafe upgrades or operational divergences and exact policy-supporting pointers on corrected deterministic non-MARS cases.",
+  "model": {
+    "bundle_id": "gcb_3c524fca63f08435a526f0b419cf72f3c638a2e49c530f60bf880279ae0c472c",
+    "model_id": "google/gemma-4-E4B-it",
+    "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2"
+  },
+  "preregistration": "experiments/canonical/gemma4_e4b_shadow_external_v2.json",
+  "schema": "hyphae-transformer.governed-control-shadow-result/v2",
+  "scope": "Twelve corrected deterministic synthetic CC0-1.0 non-MARS shadow cases. The retained full report and audit archive are content-addressed by the recorded digests and remain local evidence."
+}

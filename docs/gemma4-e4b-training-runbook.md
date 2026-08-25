@@ -2,8 +2,8 @@
 
 The selected parent is `google/gemma-4-E4B-it` at immutable revision
 `ee0ef6023621cff504d758262d4e04895a5af4a2`. The model is Apache-2.0 and public, but
-the local checkpoint is not present. This repository trains only the governed control
-head; Gemma parameters and buffers remain frozen.
+this repository trains only the governed control head; Gemma parameters and buffers
+remain frozen.
 
 ## Hardware Decision
 
@@ -36,24 +36,37 @@ Evaluate the held-out test and adversarial splits only after training. Do not us
 metrics for checkpoint selection. Any seed that misses a preregistered gate falsifies the
 claim; do not average a failed seed away.
 
-## Current External Blocks
+## Recorded Outcome
 
-- Gemma E4B weights/tokenizer are not cached locally or on a dedicated campaign host.
-- `transformers==5.14.1` and the dedicated ROCm runtime remain to be verified on that host.
-- The occupied host has suitable scratch, but is explicitly excluded from this campaign.
-- MARS v2 canonical dev/test and compiled evaluation dev/test data are present locally
-  with pinned digests and are converted without modifying their source.
+The original three-epoch AdamW recipe was falsified, as was the subsequent normalized
+SGD v2 recipe. The preregistered v3 control head passed held-out and adversarial gates
+for seeds 17, 29, and 43 while preserving the frozen Gemma fingerprint. The canonical
+seed-17 bundle has SHA-256
+`93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be`.
+
+The corrected external shadow v2 campaign then passed all preregistered gates on one
+dedicated MI355X:
+
+- action match `0.9167`;
+- evidence pointer exact match `1.0`;
+- zero unsafe upgrades and zero operational divergences;
+- one allowed conservative downgrade;
+- mean latency `56.82 ms` and p95 `75.37 ms` after explicit warm-up;
+- estimated cost `$0.4924`, with the Droplet deleted after evidence retrieval.
+
+The content-addressed summary is
+[`experiments/results/gemma4_e4b_shadow_external_v2.json`](../experiments/results/gemma4_e4b_shadow_external_v2.json).
+This evidence validates the bounded three-action controller and does not constitute
+fine-tuning of Gemma or unrestricted model navigation.
 
 The governed converter partitions complete 19-record MARS worlds. It uses 20 dev worlds
 for train, 10 separate dev worlds for validation, all 20 test worlds for test, and the
 final 10 dev worlds for adversarial evaluation. Source episode/world identities remain
 in the deterministic derived IDs; no world may cross splits.
 
-The dedicated executor verifies one MI355X, ROCm availability, exact model artifacts,
+The dedicated executor verified one MI355X, ROCm availability, exact model artifacts,
 `transformers==5.14.1`, and the governed dataset before running batch sizes 1, 2, 4, and
 8. Its paid-lifetime clock starts as soon as DigitalOcean returns the new Droplet and
 also covers bootstrap and evidence retrieval, with five minutes reserved for deletion.
 PyTorch addresses the ROCm device as `cuda:0`; `rocm` identifies the runtime, not a
-valid `torch.device` string. The plan remains deliberately invalid until `revision` is
-replaced with the 40-character merged commit that contains this preregistration and
-executor.
+valid `torch.device` string.

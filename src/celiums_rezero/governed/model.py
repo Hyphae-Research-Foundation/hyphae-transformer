@@ -7,6 +7,10 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
+from celiums_rezero.transformer.block import TransformerBlock
+from celiums_rezero.transformer.config import ModelConfig, ResidualStrategy
+from celiums_rezero.transformer.norm import RMSNorm
+
 
 @dataclass(frozen=True, slots=True)
 class ControlLogits:
@@ -71,6 +75,109 @@ class GovernedControlHead(nn.Module):
             pointers = pointers + self.pointer_policy_scale * (
                 evidence_scores - self.pointer_policy_score
             )
+        pointers = pointers.masked_fill(~evidence_mask, -torch.inf)
+        return ControlLogits(self.action(action_features), pointers)
+
+
+class ReZeroSequenceControlHead(nn.Module):
+    """Sequential governed controller using the shared-gate ReZero topology."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        *,
+        control_size: int = 256,
+        n_layers: int = 2,
+        n_heads: int = 8,
+        pointer_policy_score: float = 0.72,
+        pointer_policy_scale: float = 20.0,
+        use_host_control_features: bool = True,
+        maximum_evidence_items: int = 8,
+    ) -> None:
+        super().__init__()
+        if hidden_size < 1 or control_size < 2 or control_size % 2:
+            raise ValueError("hidden and control sizes are invalid")
+        if maximum_evidence_items < 1:
+            raise ValueError("maximum evidence items must be positive")
+        self.hidden_size = hidden_size
+        self.control_size = control_size
+        self.maximum_evidence_items = maximum_evidence_items
+        self.use_host_control_features = use_host_control_features
+        self.pointer_policy_score = pointer_policy_score
+        self.pointer_policy_scale = pointer_policy_scale
+        config = ModelConfig(
+            vocab_size=2,
+            max_sequence_length=maximum_evidence_items + 1,
+            n_layers=n_layers,
+            d_model=control_size,
+            n_heads=n_heads,
+            residual_strategy=ResidualStrategy.REZERO_RMS_SHARED,
+            tie_embeddings=False,
+        )
+        self.context_projection = nn.Linear(hidden_size, control_size, bias=False)
+        self.evidence_projection = nn.Linear(hidden_size, control_size, bias=False)
+        self.type_embedding = nn.Embedding(2, control_size)
+        self.blocks = nn.ModuleList(TransformerBlock(config) for _ in range(n_layers))
+        self.final_norm = RMSNorm(control_size, config.rms_norm_epsilon)
+        self.action = nn.Linear(control_size + (5 if use_host_control_features else 0), 3)
+        self.pointer = nn.Linear(control_size, 1, bias=False)
+
+    def forward(
+        self,
+        context_features: torch.Tensor,
+        evidence_features: torch.Tensor,
+        evidence_mask: torch.Tensor,
+        evidence_scores: torch.Tensor | None = None,
+        host_control_features: torch.Tensor | None = None,
+    ) -> ControlLogits:
+        if context_features.ndim != 2 or context_features.shape[-1] != self.hidden_size:
+            raise ValueError("context features have an invalid shape")
+        expected_evidence = (
+            context_features.shape[0],
+            self.maximum_evidence_items,
+            self.hidden_size,
+        )
+        if evidence_features.shape != expected_evidence:
+            raise ValueError("evidence features have an invalid shape")
+        expected_mask = expected_evidence[:2]
+        if evidence_mask.dtype is not torch.bool or evidence_mask.shape != expected_mask:
+            raise ValueError("evidence mask must be boolean with the configured shape")
+        if evidence_scores is None or evidence_scores.shape != expected_mask:
+            raise ValueError("evidence scores are required by the ReZero controller")
+        context = self.context_projection(context_features).unsqueeze(1)
+        evidence = self.evidence_projection(evidence_features)
+        types = torch.cat(
+            (
+                torch.zeros((context.shape[0], 1), dtype=torch.long, device=context.device),
+                torch.ones(expected_mask, dtype=torch.long, device=context.device),
+            ),
+            dim=1,
+        )
+        hidden = torch.cat((context, evidence), dim=1) + self.type_embedding(types)
+        for block in self.blocks:
+            hidden = block(hidden)
+        hidden = self.final_norm(hidden)
+        sequence_mask = torch.cat(
+            (
+                torch.ones((context.shape[0], 1), dtype=torch.bool, device=context.device),
+                evidence_mask,
+            ),
+            dim=1,
+        )
+        action_features = (hidden * sequence_mask.unsqueeze(-1)).sum(1) / sequence_mask.sum(
+            1, keepdim=True
+        )
+        if self.use_host_control_features:
+            if host_control_features is None or host_control_features.shape != (
+                context_features.shape[0],
+                5,
+            ):
+                raise ValueError("host control features are required by this controller")
+            action_features = torch.cat((action_features, host_control_features), dim=-1)
+        pointers = self.pointer(hidden[:, 1:]).squeeze(-1)
+        pointers = pointers + self.pointer_policy_scale * (
+            evidence_scores - self.pointer_policy_score
+        )
         pointers = pointers.masked_fill(~evidence_mask, -torch.inf)
         return ControlLogits(self.action(action_features), pointers)
 
