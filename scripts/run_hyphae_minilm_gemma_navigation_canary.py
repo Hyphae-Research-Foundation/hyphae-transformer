@@ -457,6 +457,17 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             failure_reasons.append("step0 action is not search")
         if step0_decision.selected_handles:
             failure_reasons.append("step0 selected handles despite search contract")
+        claimed = store.claim_finalization(
+            owner_id="navigation-canary-finalizer",
+            lease_seconds=60,
+            job_id=pending.job_id,
+        )
+        if claimed is None:
+            raise RuntimeError("navigation distractor finalization is unclaimable")
+        store.complete_insufficient(
+            claimed[1],
+            failure="distractor generation cannot support the query",
+        )
     _stop_daemon(first["daemon"], first["socket_path"])
     daemon = None
     second = backend("native2", "navigation-canary-v1-body")
