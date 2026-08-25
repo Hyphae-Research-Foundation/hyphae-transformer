@@ -307,7 +307,7 @@ def run_rezero_sequence_smoke(
     gate_group = next((group for group in groups if group["name"] == "gates"), None)
     gates_excluded_from_decay = gate_group is not None and gate_group["weight_decay"] == 0
     peak_vram_bytes = (
-        torch.cuda.max_memory_allocated(device) if device.type == "cuda" else 0
+        torch.cuda.max_memory_allocated() if device.type == "cuda" else 0
     )
     maximum_vram_bytes = int(maximum_vram_gib * 1024**3)
     report: dict[str, object] = {
