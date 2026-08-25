@@ -46,7 +46,7 @@ def test_selection_key_uses_preregistered_order() -> None:
                 "evidence_exact_match": 0.9,
                 "action_accuracy": 0.9,
             },
-            "training": {"final_loss": 0.5},
+            "training": {"final_loss": 0.5, "selected_loss": 0.5},
         }
     ]
     second = [
@@ -58,7 +58,7 @@ def test_selection_key_uses_preregistered_order() -> None:
                 "evidence_exact_match": 1.0,
                 "action_accuracy": 1.0,
             },
-            "training": {"final_loss": 0.1},
+            "training": {"final_loss": 0.1, "selected_loss": 0.1},
         }
     ]
     assert _selection_key(0.01, first) < _selection_key(0.001, second)
@@ -74,7 +74,7 @@ def test_selection_key_breaks_exact_ties_with_lower_learning_rate() -> None:
                 "evidence_exact_match": 1.0,
                 "action_accuracy": 1.0,
             },
-            "training": {"final_loss": 0.1},
+            "training": {"final_loss": 0.1, "selected_loss": 0.1},
         }
     ]
     assert _selection_key(0.001, reports) < _selection_key(0.01, reports)
