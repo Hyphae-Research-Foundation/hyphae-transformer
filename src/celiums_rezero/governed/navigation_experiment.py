@@ -493,6 +493,7 @@ def decide_navigation_step(
     policy: SufficiencyPolicy,
     search_steps_used: int,
     device: torch.device,
+    present_evidence: bool = True,
 ) -> NavigationDecision:
     hits = tuple(hit for hit in evidence.hits if hit.active and hit.trusted)
     if (
@@ -501,13 +502,14 @@ def decide_navigation_step(
     ):
         raise ValueError("navigation step exceeds the pilot evidence bound")
     ordered = tuple(sorted(hits, key=lambda hit: hit.content_digest))
+    presented = ordered if present_evidence else ()
     context = backbone.encode(
         (
             canonical_json(
                 {
                     "schema": "governed-navigation-context-v1",
                     "query": query,
-                    "evidence": [hit.text for hit in ordered],
+                    "evidence": [hit.text for hit in presented],
                     "search_steps_used": search_steps_used,
                 }
             ),
@@ -523,13 +525,13 @@ def decide_navigation_step(
     )
     mask = torch.zeros((1, pilot.maximum_evidence_items), dtype=torch.bool, device=device)
     scores = torch.zeros_like(mask, dtype=torch.float32)
-    if ordered:
-        encoded = backbone.encode(tuple(hit.text for hit in ordered), device=device)
-        validate_frozen_features(backbone, encoded, items=len(ordered))
-        evidence_features[0, : len(ordered)] = encoded
-        mask[0, : len(ordered)] = True
-        scores[0, : len(ordered)] = torch.tensor(
-            [hit.score for hit in ordered], dtype=torch.float32, device=device
+    if presented:
+        encoded = backbone.encode(tuple(hit.text for hit in presented), device=device)
+        validate_frozen_features(backbone, encoded, items=len(presented))
+        evidence_features[0, : len(presented)] = encoded
+        mask[0, : len(presented)] = True
+        scores[0, : len(presented)] = torch.tensor(
+            [hit.score for hit in presented], dtype=torch.float32, device=device
         )
     host = torch.tensor(
         [
@@ -555,9 +557,11 @@ def decide_navigation_step(
     selected = tuple(
         hit.handle
         for hit, value in zip(
-            ordered, torch.sigmoid(pointers[0, : len(ordered)]).tolist(), strict=True
+            ordered,
+            torch.sigmoid(pointers[0, : len(ordered)]).tolist(),
+            strict=True,
         )
-        if value >= POINTER_LOGIT_THRESHOLD
+        if value >= POINTER_LOGIT_THRESHOLD and present_evidence
     )
     return NavigationDecision(NAVIGATION_ACTIONS[index], selected)
 
