@@ -73,3 +73,23 @@ content-addressed result is
 
 This result satisfies the smoke promotion gate for the preregistered frozen-feature
 training search. It does not report validation, test, or adversarial model quality.
+
+## Frozen-Gemma Training Result
+
+The preregistered search completed all nine train/validation runs for learning rates
+`0.001`, `0.003`, and `0.01` across seeds 17, 29, and 43. Every validation run passed
+with zero unsafe answers. The ranking selected `0.001` because it achieved evidence
+exact match `0.99999994` on validation, ahead of `0.99090904` for both larger learning
+rates; final training loss was therefore not used to override the earlier ranking
+criterion.
+
+The selected recipe was evaluated once on test and adversarial splits. Every seed
+passed all gates with action accuracy 1.0, abstention recall 1.0, answer recall within
+float32 precision of 1.0, and zero unsafe answers. Test evidence exact match ranged
+from `0.99545449` to `0.99999994`; adversarial exact match ranged from `0.99090904` to
+`0.99999994`. Gemma remained unchanged throughout.
+
+The content-addressed result is recorded in
+[`experiments/results/gemma4_e4b_rezero_sequence_control_v1.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v1.json).
+This promotes the ReZero controller to deterministic packaging and external shadow
+evaluation. It still does not authorize Gemma fine-tuning or multi-step navigation.
