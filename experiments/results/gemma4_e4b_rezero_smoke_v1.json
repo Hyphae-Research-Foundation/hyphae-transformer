@@ -1,0 +1,41 @@
+{
+  "analysis": {
+    "backbone_unchanged": true,
+    "gate_gradients_finite": true,
+    "gates_excluded_from_weight_decay": true,
+    "loss": 0.9911147952079773,
+    "parameters": 2919188,
+    "peak_vram_bytes": 18002620928,
+    "residual_gates": 2,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "bootstrap_stderr_sha256": "18c57771b679b727c4f1581a48617789c095e2ae6893babbe5a98d87f67a2b7d",
+    "bootstrap_stdout_sha256": "242bb3773f1b8f8b082fac1b8cd72d67fff2d7db9c532ae6f69837085fb38471",
+    "campaign_stderr_sha256": "4c74714199e539ea31be8f514d633264a58c7b1623631b3ddb195849dad6aa90",
+    "campaign_stdout_sha256": "579c6b5eae59baa6abd1cf8647b071b648cb1a440cfe76468b118887d5205407",
+    "cloud_execution_sha256": "1dc96320226d86c8660e3669af89a879faf1372a430565c58a96a4b07c7a899f",
+    "smoke_report_sha256": "579c6b5eae59baa6abd1cf8647b071b648cb1a440cfe76468b118887d5205407"
+  },
+  "campaign": {
+    "accelerator": "amd-mi355x-288gb",
+    "completed": true,
+    "created_at": "2026-08-25T12:23:37.864760+00:00",
+    "deleted_at": "2026-08-25T12:30:08.156406+00:00",
+    "droplet_id": 595026362,
+    "estimated_cost_usd": 0.4878645575,
+    "lifetime_seconds": 390.291646,
+    "resources_remaining": 0,
+    "source_revision": "d4ca96e4cb8e756e1daf832294693cf827b11427",
+    "status": "completed"
+  },
+  "dataset_id": "gtd_b7161eb4c1cf007dca96741ad8acffbe25cd9b6b46681fd48f19f21fde29332f",
+  "model": {
+    "artifact_manifest_sha256": "662a2f15fe866f2350da4bfeefc746b0eb72c917d344dda2602df88230401561",
+    "feature_contract": "gemma4-e4b-it-layer41-final-valid-token-f32-v1",
+    "model_id": "google/gemma-4-E4B-it",
+    "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2"
+  },
+  "preregistration_sha256": "9be1d9cf982a48c6ca2c2559653a7cdf7993bc495756954a7d1c39f5ec2e3053",
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-smoke-result/v1"
+}
