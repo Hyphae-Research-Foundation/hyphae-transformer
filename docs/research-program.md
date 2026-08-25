@@ -305,3 +305,8 @@ to abstention. There were no unsafe upgrades. This negative external-validity re
 preserved in
 [`experiments/results/gemma4_e4b_rezero_shadow_external_v1.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v1.json),
 and blocks runtime promotion.
+
+The bounded-certificate v4 follow-up subsequently passed the unchanged external shadow:
+action and pointer exact match were both 1.0, with zero unsafe upgrades or operational
+divergences. This restores promotion to a production-shaped canary while keeping Gemma
+frozen and host policy authoritative.

@@ -157,3 +157,11 @@ validation, test, and adversarial gates with exact evidence sets and zero unsafe
 answers. The result is
 [`experiments/results/gemma4_e4b_rezero_sequence_control_v4.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v4.json).
 The unchanged external shadow is preregistered before execution.
+
+The v4 external shadow passed all unchanged gates: action match and pointer exact match
+were both 1.0, with zero divergences, zero conservative downgrades, and zero unsafe
+upgrades. Mean latency was `60.43 ms` and p95 was `80.29 ms`. The result is preserved
+in
+[`experiments/results/gemma4_e4b_rezero_shadow_external_v4.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v4.json).
+This validates promotion to a production-shaped quoted-runtime canary; it does not yet
+authorize autonomous multi-step navigation.
