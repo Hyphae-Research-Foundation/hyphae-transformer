@@ -35,7 +35,7 @@ from celiums_rezero.governed.schemas import GovernedDataset
 from celiums_rezero.lab.serialization import canonical_json
 
 SCHEMA = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v1"
-POINTER_LOGIT_THRESHOLD = 0.0
+POINTER_LOGIT_THRESHOLD = 0.5
 
 
 class NavigationTrainingSummary(TypedDict):
