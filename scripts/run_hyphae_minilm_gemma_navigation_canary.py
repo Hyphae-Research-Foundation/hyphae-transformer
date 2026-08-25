@@ -545,6 +545,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
                 "evidence_handles": [hit.handle for hit in distractor_evidence.hits],
                 "action": step0_decision.action,
                 "selected_handles": list(step0_decision.selected_handles),
+                "action_logits": list(step0_decision.action_logits),
             },
             {
                 "step": 1,
@@ -552,6 +553,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
                 "evidence_handles": [hit.handle for hit in evidence.hits],
                 "action": live_decision.action,
                 "selected_handles": list(live_decision.selected_handles),
+                "action_logits": list(live_decision.action_logits),
             },
         ]
         passed = (

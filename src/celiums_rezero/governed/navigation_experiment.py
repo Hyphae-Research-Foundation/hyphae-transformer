@@ -438,6 +438,7 @@ def run_navigation_experiment(
 class NavigationDecision:
     action: str
     selected_handles: tuple[str, ...]
+    action_logits: tuple[float, ...] = ()
 
 
 def load_navigation_pilot(
@@ -563,7 +564,11 @@ def decide_navigation_step(
         )
         if value >= POINTER_LOGIT_THRESHOLD and present_evidence
     )
-    return NavigationDecision(NAVIGATION_ACTIONS[index], selected)
+    return NavigationDecision(
+        NAVIGATION_ACTIONS[index],
+        selected,
+        tuple(float(value) for value in action_logits[0].tolist()),
+    )
 
 
 def _pilot_from_prereg(
