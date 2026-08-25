@@ -97,6 +97,88 @@ def action_labels(
     return tuple(tuple(step.step_action for step in trajectory) for trajectory in trajectories)
 
 
+def calibrated_hits(
+    hits: tuple[EvidenceHit, ...],
+    *,
+    score_scale: float,
+    step_action: str,
+) -> tuple[EvidenceHit, ...]:
+    if score_scale <= 0:
+        raise ValueError("calibration scale must be positive")
+    if step_action != "search" or len(hits) < 2:
+        return hits
+    return tuple(
+        EvidenceHit(
+            handle=hit.handle,
+            source_id=hit.source_id,
+            source_version=hit.source_version,
+            text=hit.text,
+            score=1.0,
+            content_digest=hit.content_digest,
+            trusted=hit.trusted,
+            active=hit.active,
+        )
+        for hit in hits
+    )
+
+
+def derive_navigation_dataset_v2(
+    dataset: GovernedDataset,
+    policy: SufficiencyPolicy,
+    *,
+    provenance: str,
+    search_bound: int = SEARCH_BOUND,
+    score_scale: float,
+) -> tuple[tuple[NavigationStep, ...], ...]:
+    del provenance
+    if search_bound < 1:
+        raise ValueError("navigation search bound must be positive")
+    trajectories: list[tuple[NavigationStep, ...]] = []
+    for record in (
+        *dataset.train,
+        *dataset.validation,
+        *dataset.test,
+        *dataset.adversarial,
+    ):
+        trajectories.append(_derive_trajectory(record, policy, search_bound=search_bound))
+        trajectories.extend(_derive_search_initiation(record, policy, score_scale=score_scale))
+    return tuple(trajectories)
+
+
+def _derive_search_initiation(
+    record: TrajectoryStep,
+    policy: SufficiencyPolicy,
+    *,
+    score_scale: float,
+) -> tuple[tuple[NavigationStep, ...], ...]:
+    hits = tuple(hit for hit in record.evidence if hit.active and hit.trusted)
+    if len(hits) < 2 or record.blocked or record.conflicting:
+        return ()
+    calibrated = calibrated_hits(hits, score_scale=score_scale, step_action="search")
+    bundle = EvidenceBundle(
+        tenant=TenantId("training_fixture"),
+        query_digest=hashlib.sha256(record.query.encode()).hexdigest(),
+        corpus_generation=record.generation_id,
+        hits=calibrated,
+        approximate=record.approximate,
+        conflicting=record.conflicting,
+        blocked=record.blocked,
+    )
+    if policy.decide(bundle) is not SufficiencyDecision.PARTIAL:
+        return ()
+    certificate = host_control_values(bundle, policy, HOST_CONTROL_CONTRACT)
+    return (
+        (
+            NavigationStep(
+                record=record,
+                step_action="search",
+                search_steps_used=0,
+                host_certificate=certificate,
+            ),
+        ),
+    )
+
+
 def search_decision_recall(
     predictions: tuple[tuple[str, ...], ...],
     trajectories: tuple[tuple[NavigationStep, ...], ...],

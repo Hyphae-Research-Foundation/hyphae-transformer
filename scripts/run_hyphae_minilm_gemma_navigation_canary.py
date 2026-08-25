@@ -70,6 +70,7 @@ HYPHAE_WHEEL_SHA256 = "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49
 COLLECTION_SHA256 = "181552f7f9666546db8f09b3e89be98e99f4c4e09be227f6d257da93029ea527"
 NAVIGATION_BUNDLE_SHA256 = "5cb0381c03f944706819e6c5ce2d9dc71be63c27b88292cfd28fd2b489d7b7c8"
 NAVIGATION_CHECKPOINT_SHA256 = "47940ec5f690fab92f13601ca6c1593b8897d062a04c3b853e4fc99fd762aca2"
+REPORT_SCHEMA = "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1"
 QUERY = "what is the approved maintenance window?"
 BODY = b"Service policy: approved maintenance window is 02:00-04:00 UTC."
 DISTRACTOR = (
@@ -158,7 +159,7 @@ def main() -> int:
     _write_json(
         arguments.out / "navigation-campaign-report.json",
         {
-            "schema": "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1",
+            "schema": REPORT_SCHEMA,
             "completed": False,
         },
     )
@@ -168,7 +169,7 @@ def main() -> int:
         report, daemon = run(arguments)
     except Exception:
         report = {
-            "schema": "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1",
+            "schema": REPORT_SCHEMA,
             "completed": False,
             "passed": False,
             "failure": "navigation canary failed"[:4096],
@@ -666,7 +667,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             and tuple(live_decision.selected_handles) == tuple(hit.handle for hit in evidence.hits)
         )
         report = {
-            "schema": "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1",
+            "schema": REPORT_SCHEMA,
             "completed": True,
             "passed": passed,
             "failure": None if passed else "; ".join(failure_reasons),
