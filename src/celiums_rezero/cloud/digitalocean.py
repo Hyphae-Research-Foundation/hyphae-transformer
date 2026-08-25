@@ -1273,7 +1273,7 @@ def _write_retrieved_evidence(
                 )
             )
     except (ValueError, KeyError, json.JSONDecodeError, tarfile.TarError) as error:
-        raise RuntimeError("retrieved cloud campaign evidence is invalid") from error
+        raise RuntimeError(f"retrieved cloud campaign evidence is invalid: {error}") from error
     if not completed:
         raise RuntimeError("retrieved cloud campaign evidence did not complete")
     (plan.artifact_directory / _expected_artifact_name(plan)).write_bytes(payload)
