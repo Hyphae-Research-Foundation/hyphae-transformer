@@ -151,3 +151,9 @@ seed. Selection uses no validation, test, adversarial, or shadow signal; it only
 discarding an earlier numerically better state when the fixed certificate already makes
 loss effectively zero. The protocol is
 [`experiments/canonical/gemma4_e4b_rezero_sequence_control_v4.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v4.json).
+
+The v4 run selected epoch 1 by training loss for every seed and passed all structural,
+validation, test, and adversarial gates with exact evidence sets and zero unsafe
+answers. The result is
+[`experiments/results/gemma4_e4b_rezero_sequence_control_v4.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v4.json).
+The unchanged external shadow is preregistered before execution.

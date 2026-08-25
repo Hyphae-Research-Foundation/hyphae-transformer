@@ -1,0 +1,39 @@
+{
+  "analysis": {
+    "backbone_unchanged": true,
+    "passed": true,
+    "report_id": "rzsc_ce8d3fb0d4a37ef5ffc8d0f25b1f4776a3d58508aeea83725456e88aba80b583",
+    "selected_learning_rate": 0.0001,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "archive_sha256": "aabf2b09e4b7aeccfc9ea2b31b605d9e2e0ddfeb9fd44a26220580d3b2929e21",
+    "cloud_execution_sha256": "83086c4acc632efe8b1f7fe60b6befb37e7946d88442ac5fff93e86a27bfc24c",
+    "report_sha256": "9b182a7eb19df66824595f099105e03c5ccf53dd3508b8c8ef335e2859bf9fd8"
+  },
+  "bundle_candidate": {
+    "bundle_id": "rzcb_18347c6eca826c4eea75aa78a8ddbbe69e7c2adfebe9921985ead9bc364a92ee",
+    "bundle_sha256": "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121",
+    "seed": 17
+  },
+  "campaign": {
+    "completed": true,
+    "droplet_id": 595052861,
+    "estimated_cost_usd": 0.6263169,
+    "lifetime_seconds": 501.05352,
+    "resources_remaining": 0,
+    "status": "completed"
+  },
+  "checkpoints": {
+    "seed_17_sha256": "b9099679e71a2ba75204cd8d41a534ff96c6dad0af39352ae67445f483ef1c34",
+    "seed_29_sha256": "dfeff0fb9f887868acd4fd9b9146b2b2614319a12dbe5377a6211670f8e19ada",
+    "seed_43_sha256": "33dca0e922fb91de4b1b84000300bff844bd96bb2e150242214a4adedb3d3d34"
+  },
+  "final": [
+    {"seed": 17, "selected_epoch": 1, "selected_loss": 2.1832946561772815e-09, "test_exact_match": 0.9999999403953552, "adversarial_exact_match": 0.9999999403953552, "unsafe_answer_rate": 0.0},
+    {"seed": 29, "selected_epoch": 1, "selected_loss": 1.3407177590352148e-09, "test_exact_match": 0.9999999403953552, "adversarial_exact_match": 0.9999999403953552, "unsafe_answer_rate": 0.0},
+    {"seed": 43, "selected_epoch": 1, "selected_loss": 3.1917246623436313e-09, "test_exact_match": 0.9999999403953552, "adversarial_exact_match": 0.9999999403953552, "unsafe_answer_rate": 0.0}
+  ],
+  "preregistration_sha256": "6c2d35ad7fcc291d8545b4ead6ae4a14015f1b08f7518d80435a5e0455fbd8b9",
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-sequence-control-result/v4"
+}
