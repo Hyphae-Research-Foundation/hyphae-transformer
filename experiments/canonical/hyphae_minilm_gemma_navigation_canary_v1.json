@@ -1,0 +1,30 @@
+{
+  "claim": "The trained ReZero neuropilot navigates one real authenticated Hyphae corpus multi-step: it requests search on empty evidence, then after live publication and exact retrieval it answers and selects exactly the policy-supporting evidence, with host-computed certificates and zero unsafe authority.",
+  "gates": {
+    "live_action": "answer",
+    "live_selected_equals_retrieved": true,
+    "maximum_cost_usd": 2.25,
+    "restart_replay": true,
+    "retrieval_approximate": false,
+    "retrieval_strategy": "exact_filtered",
+    "search_steps_bound": 2,
+    "step0_action": "search",
+    "step0_selected": []
+  },
+  "hyphae": {
+    "binary_sha256": "a00ea0cfc502ad63d65c42357664f7664f8a8c482fbdeb24a4f5511feceb45d0",
+    "sdk_wheel_sha256": "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb",
+    "version": "2.1.0"
+  },
+  "minilm_manifest_sha256": "e5d9d07b6db0c99cc4a2afa92047d57b84c3cb6ed48137ad3612601fdbe21411",
+  "pilot": {
+    "bundle_sha256": "5cb0381c03f944706819e6c5ce2d9dc71be63c27b88292cfd28fd2b489d7b7c8",
+    "checkpoint_sha256": "47940ec5f690fab92f13601ca6c1593b8897d062a04c3b853e4fc99fd762aca2",
+    "maximum_evidence_items": 8,
+    "navigation_report_sha256": "5c076073d896642ab30ea7355035a89d8e8654bf49a3d766fa302392b42400a9",
+    "seed": 17,
+    "source_result": "experiments/results/gemma4_e4b_rezero_navigation_v1.json"
+  },
+  "schema": "hyphae-transformer.hyphae-minilm-gemma-navigation-canary-preregistration/v1",
+  "scope": "One operator-owned text fixture navigated by the frozen-features ReZero neuropilot; retrieval, publication, generation authority, and tenants remain host-owned; no Gemma fine-tuning."
+}

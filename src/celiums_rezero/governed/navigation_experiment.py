@@ -18,6 +18,7 @@ from torch import nn
 from celiums_rezero.core.gates import is_gate_parameter
 from celiums_rezero.core.optim import build_optimizer_groups
 from celiums_rezero.governed.backbone import FrozenTextBackbone, validate_frozen_features
+from celiums_rezero.governed.data import host_control_values
 from celiums_rezero.governed.hyphaelm import (
     ABSTAIN_INDEX,
     ANSWER_INDEX,
@@ -25,6 +26,7 @@ from celiums_rezero.governed.hyphaelm import (
     ReZeroNeuroPilot,
 )
 from celiums_rezero.governed.navigation import (
+    HOST_CONTROL_CONTRACT,
     NAVIGATION_ACTIONS,
     NavigationStep,
     action_labels,
@@ -32,6 +34,7 @@ from celiums_rezero.governed.navigation import (
     expected_pointer_targets,
 )
 from celiums_rezero.governed.schemas import GovernedDataset
+from celiums_rezero.knowledge.schemas import EvidenceBundle, SufficiencyPolicy
 from celiums_rezero.lab.serialization import canonical_json
 
 SCHEMA = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v1"
@@ -429,6 +432,134 @@ def run_navigation_experiment(
         json.dumps(report, indent=2, sort_keys=True) + "\n"
     )
     return report
+
+
+@dataclass(frozen=True, slots=True)
+class NavigationDecision:
+    action: str
+    selected_handles: tuple[str, ...]
+
+
+def load_navigation_pilot(
+    checkpoint: Path,
+    *,
+    hidden_size: int,
+    device: torch.device,
+    control_size: int = 256,
+    n_layers: int = 2,
+    n_heads: int = 8,
+    host_control_contract: str = HOST_CONTROL_CONTRACT,
+    action_policy_prior_scale: float = 20.0,
+    action_residual_bound: float = 1.0,
+    pointer_policy_score: float = 0.72,
+    pointer_policy_scale: float = 20.0,
+) -> ReZeroNeuroPilot:
+    payload = torch.load(
+        __import__("io").BytesIO(checkpoint.read_bytes()),
+        map_location=device,
+        weights_only=False,
+    )
+    if payload.get("version") != 1 or tuple(payload.get("action_order", ())) != tuple(
+        NAVIGATION_ACTIONS
+    ):
+        raise ValueError("navigation checkpoint contract is invalid")
+    maximum_evidence_items = int(payload["maximum_evidence_items"])
+    if maximum_evidence_items < 1:
+        raise ValueError("navigation checkpoint evidence bound is invalid")
+    pilot = ReZeroNeuroPilot(
+        hidden_size,
+        control_size=control_size,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        host_control_contract=host_control_contract,
+        action_policy_prior_scale=action_policy_prior_scale,
+        action_residual_bound=action_residual_bound,
+        pointer_policy_score=pointer_policy_score,
+        pointer_policy_scale=pointer_policy_scale,
+        maximum_evidence_items=maximum_evidence_items,
+    ).to(device)
+    pilot.load_state_dict(payload["head"], strict=True)
+    pilot.eval()
+    return pilot
+
+
+@torch.inference_mode()
+def decide_navigation_step(
+    *,
+    backbone: FrozenTextBackbone,
+    pilot: ReZeroNeuroPilot,
+    query: str,
+    evidence: EvidenceBundle,
+    policy: SufficiencyPolicy,
+    search_steps_used: int,
+    device: torch.device,
+) -> NavigationDecision:
+    hits = tuple(hit for hit in evidence.hits if hit.active and hit.trusted)
+    if (
+        len(hits) > pilot.maximum_evidence_items
+        or search_steps_used >= pilot.maximum_evidence_items
+    ):
+        raise ValueError("navigation step exceeds the pilot evidence bound")
+    ordered = tuple(sorted(hits, key=lambda hit: hit.content_digest))
+    context = backbone.encode(
+        (
+            canonical_json(
+                {
+                    "schema": "governed-navigation-context-v1",
+                    "query": query,
+                    "evidence": [hit.text for hit in ordered],
+                    "search_steps_used": search_steps_used,
+                }
+            ),
+        ),
+        device=device,
+    )
+    validate_frozen_features(backbone, context, items=1)
+    hidden = backbone.identity.hidden_size
+    evidence_features = torch.zeros(
+        (1, pilot.maximum_evidence_items, hidden),
+        dtype=torch.float32,
+        device=device,
+    )
+    mask = torch.zeros((1, pilot.maximum_evidence_items), dtype=torch.bool, device=device)
+    scores = torch.zeros_like(mask, dtype=torch.float32)
+    if ordered:
+        encoded = backbone.encode(tuple(hit.text for hit in ordered), device=device)
+        validate_frozen_features(backbone, encoded, items=len(ordered))
+        evidence_features[0, : len(ordered)] = encoded
+        mask[0, : len(ordered)] = True
+        scores[0, : len(ordered)] = torch.tensor(
+            [hit.score for hit in ordered], dtype=torch.float32, device=device
+        )
+    host = torch.tensor(
+        [
+            host_control_values(
+                EvidenceBundle(
+                    tenant=evidence.tenant,
+                    query_digest=evidence.query_digest,
+                    corpus_generation=evidence.corpus_generation,
+                    hits=ordered,
+                    approximate=evidence.approximate,
+                    conflicting=evidence.conflicting,
+                    blocked=evidence.blocked,
+                ),
+                policy,
+                HOST_CONTROL_CONTRACT,
+            )
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
+    action_logits, pointers = pilot(context, evidence_features, mask, scores, host)
+    index = int(action_logits.argmax(-1).item())
+    selected = tuple(
+        hit.handle
+        for hit, value in zip(
+            ordered, torch.sigmoid(pointers[0, : len(ordered)]).tolist(), strict=True
+        )
+        if value >= POINTER_LOGIT_THRESHOLD
+    )
+    return NavigationDecision(NAVIGATION_ACTIONS[index], selected)
 
 
 def _pilot_from_prereg(
