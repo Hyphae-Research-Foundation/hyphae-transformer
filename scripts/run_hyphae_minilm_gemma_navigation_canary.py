@@ -565,11 +565,19 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         reopened = SQLiteTenantStore(arguments.work_root / "routing.sqlite3", tenant=TENANT)
         authority = GenerationAuthority(reopened, receipts=recovered)
         authority.verify_candidate(manifest, (receipt,))
+        pause_receipt = authority.pause(
+            expected_revision=authority.snapshot().revision,
+            actor="navigation-canary-operator",
+        )
         activation = authority.activate(
             GENERATION,
-            expected_revision=1,
+            expected_revision=pause_receipt.resulting_revision,
             actor="navigation-canary-operator",
             reason="real navigation canary bootstrap",
+        )
+        authority.resume(
+            expected_revision=activation.resulting_revision,
+            actor="navigation-canary-operator",
         )
         router = GenerationRoutedRetriever(
             tenant=TENANT,
