@@ -274,77 +274,103 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
     )
     if any(len(item.values) != 384 for item in distractor_embedded):
         raise RuntimeError("navigation distractor chunk dimensions differ")
-    data = arguments.work_root / "native"
-    socket_path = arguments.work_root / "hyphae.sock"
-    owner_key = arguments.work_root / "owner.key"
-    _run_json([str(arguments.hyphae_binary), "init", "--data-dir", str(data)])
-    daemon = _start_daemon(arguments.hyphae_binary, data, socket_path, arguments.out)
-    collection = json.loads(
-        _run(
+    store = SQLiteTenantStore(arguments.work_root / "routing.sqlite3", tenant=TENANT)
+    receipts = PublicationReceiptStore(arguments.work_root / "receipts")
+    coordinator = KnowledgeCoordinator(
+        sufficiency=policy,
+        acquisition=AcquisitionPolicy(
+            version="navigation-policy-v1",
+            sources=(source_policy, distractor_policy),
+        ),
+        store=store,
+        embedding_profile=embedder.profile,
+    )
+    authority = GenerationAuthority(store, receipts=receipts)
+    worker_connector = InMemorySourceConnector(
+        {
+            (TENANT.value, artifact.source_id): artifact,
+            (TENANT.value, distractor.source_id): distractor,
+        }
+    )
+    authorizer = DurablePublicationAuthorizer(
+        tenant=TENANT,
+        store=receipts,
+        authority="navigation-canary-operator",
+        enabled=True,
+    )
+
+    def backend(name: str, label: str) -> dict[str, object]:
+        data = arguments.work_root / name
+        socket_path = arguments.work_root / (name + ".sock")
+        owner_key = arguments.work_root / (name + ".key")
+        _run_json([str(arguments.hyphae_binary), "init", "--data-dir", str(data)])
+        daemon = _start_daemon(arguments.hyphae_binary, data, socket_path, arguments.out)
+        definition = json.loads(
+            _run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hyphae_210_collection.py")),
+                    str(socket_path),
+                    "--vector-dimensions",
+                    "384",
+                ]
+            )
+        )
+        if definition.get("collection_definition_sha256") != COLLECTION_SHA256:
+            raise RuntimeError("navigation 384D collection definition differs")
+        _stop_daemon(daemon, socket_path)
+        _run_json(
             [
-                sys.executable,
-                str(Path(__file__).with_name("hyphae_210_collection.py")),
-                str(socket_path),
-                "--vector-dimensions",
-                "384",
+                str(arguments.hyphae_binary),
+                "search",
+                "--data-dir",
+                str(data),
+                "provision",
+                "--collection",
+                "13",
             ]
         )
-    )
-    if collection.get("collection_definition_sha256") != COLLECTION_SHA256:
-        raise RuntimeError("navigation 384D collection definition differs")
-    _stop_daemon(daemon, socket_path)
-    daemon = None
-    _run_json(
-        [
-            str(arguments.hyphae_binary),
-            "search",
-            "--data-dir",
-            str(data),
-            "provision",
-            "--collection",
-            "13",
-        ]
-    )
-    _run_json(
-        [
-            str(arguments.hyphae_binary),
-            "security",
-            "--data-dir",
-            str(data),
-            "bootstrap",
-            "--name",
-            "navigation-canary-owner",
-            "--label",
-            "navigation-canary-v1",
-            "--key-out",
-            str(owner_key),
-        ]
-    )
-    key = owner_key.read_text(encoding="ascii").strip()
-    daemon = _start_daemon(
-        arguments.hyphae_binary,
-        data,
-        socket_path,
-        arguments.out,
-        authenticated=True,
-    )
-    with HyphaeClient.local_authenticated(str(socket_path), key) as raw_client:
+        _run_json(
+            [
+                str(arguments.hyphae_binary),
+                "security",
+                "--data-dir",
+                str(data),
+                "bootstrap",
+                "--name",
+                name,
+                "--label",
+                label,
+                "--key-out",
+                str(owner_key),
+            ]
+        )
+        key = owner_key.read_text(encoding="ascii").strip()
+        daemon = _start_daemon(
+            arguments.hyphae_binary,
+            data,
+            socket_path,
+            arguments.out,
+            authenticated=True,
+        )
+        raw_client = HyphaeClient.local_authenticated(str(socket_path), key)
         owner_key.unlink(missing_ok=True)
         status = raw_client.admin("status")
         lineage = status.value["snapshot"]["directory_lineage"]
-        backend_id = hashlib.sha256(lineage).hexdigest()
+        return {
+            "data": data,
+            "socket_path": socket_path,
+            "key": key,
+            "daemon": daemon,
+            "raw_client": raw_client,
+            "backend_id": hashlib.sha256(lineage).hexdigest(),
+        }
+
+    first = backend("native", "navigation-canary-v1")
+    daemon = first["daemon"]
+    with first["raw_client"] as raw_client:
         client = BoundedRecordingClient(raw_client, RequestOptions)
-        store = SQLiteTenantStore(arguments.work_root / "routing.sqlite3", tenant=TENANT)
-        receipts = PublicationReceiptStore(arguments.work_root / "receipts")
-        coordinator = KnowledgeCoordinator(
-            sufficiency=policy,
-            acquisition=AcquisitionPolicy(
-                version="navigation-policy-v1",
-                sources=(source_policy, distractor_policy),
-            ),
-            store=store,
-            embedding_profile=embedder.profile,
-        )
+        backend_id = str(first["backend_id"])
         pending = coordinator.answer_or_enqueue(
             tenant=TENANT,
             query=QUERY,
@@ -382,28 +408,17 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             ingest_idempotency_keys=(distractor_key,),
             ingest_receipt_digests=(),
         )
-        authority = GenerationAuthority(store, receipts=receipts)
         authority.register(distractor_manifest)
         worker = DurableAcquisitionWorker(
             worker_id="navigation-canary-acquisition",
             lease_seconds=120,
             coordinator=coordinator,
-            connector=InMemorySourceConnector(
-                {
-                    (TENANT.value, artifact.source_id): artifact,
-                    (TENANT.value, distractor.source_id): distractor,
-                }
-            ),
+            connector=worker_connector,
             embedder=embedder,
             ingestor=ingestor,
             verifier=ingestor,
             validator=validator,
-            authorizer=DurablePublicationAuthorizer(
-                tenant=TENANT,
-                store=receipts,
-                authority="navigation-canary-operator",
-                enabled=True,
-            ),
+            authorizer=authorizer,
         )
         outcome = worker.run_next(job_id=pending.job_id)
         if outcome is None or outcome.receipt is None or outcome.job.status is not JobStatus.READY:
@@ -442,6 +457,22 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             failure_reasons.append("step0 action is not search")
         if step0_decision.selected_handles:
             failure_reasons.append("step0 selected handles despite search contract")
+    _stop_daemon(first["daemon"], first["socket_path"])
+    daemon = None
+    second = backend("native2", "navigation-canary-v1-body")
+    daemon = second["daemon"]
+    with second["raw_client"] as raw_client2:
+        client2 = BoundedRecordingClient(raw_client2, RequestOptions)
+        backend_id2 = str(second["backend_id"])
+        ingestor2 = HyphaeShadowIngestor(
+            tenant=TENANT,
+            client=client2,
+            collection=13,
+            vector_target="semantic",
+            backend_id=backend_id2,
+            publish=True,
+            receipt_store=receipts,
+        )
         ephemeral_job = AcquisitionJob(
             tenant=TENANT,
             query=normalize_query(QUERY),
@@ -452,12 +483,12 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             source_id=artifact.source_id,
         )
         key_id = ingest_idempotency_key(
-            ephemeral_job, embedded, embedder.profile, target=ingestor.target
+            ephemeral_job, embedded, embedder.profile, target=ingestor2.target
         )
         manifest = GenerationManifest(
             tenant=TENANT,
             generation_id=GENERATION,
-            target=ingestor.target,
+            target=ingestor2.target,
             parent_generation_id=DISTRACTOR_GENERATION,
             chunk_ids=tuple(item.chunk.chunk_id for item in embedded),
             ingest_idempotency_keys=(key_id,),
@@ -480,11 +511,23 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         body_job = coordinator.job_status(TENANT, body_pending.job_id)
         if body_job is None:
             raise RuntimeError("navigation body job is absent")
-        if ingest_idempotency_key(
-            body_job, embedded, embedder.profile, target=ingestor.target
-        ) != key_id:
+        if (
+            ingest_idempotency_key(body_job, embedded, embedder.profile, target=ingestor2.target)
+            != key_id
+        ):
             raise RuntimeError("navigation body job identity diverged")
-        body_outcome = worker.run_next(job_id=body_pending.job_id)
+        worker2 = DurableAcquisitionWorker(
+            worker_id="navigation-canary-acquisition-body",
+            lease_seconds=120,
+            coordinator=coordinator,
+            connector=worker_connector,
+            embedder=embedder,
+            ingestor=ingestor2,
+            verifier=ingestor2,
+            validator=validator,
+            authorizer=authorizer,
+        )
+        body_outcome = worker2.run_next(job_id=body_pending.job_id)
         if (
             body_outcome is None
             or body_outcome.receipt is None
@@ -495,18 +538,18 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         prepared = store.prepared_ingest(TENANT, body_pending.job_id)
         if prepared is None:
             raise RuntimeError("navigation prepared ingest is absent")
-    _stop_daemon(daemon, socket_path)
+    _stop_daemon(second["daemon"], second["socket_path"])
     daemon = _start_daemon(
         arguments.hyphae_binary,
-        data,
-        socket_path,
+        second["data"],
+        second["socket_path"],
         arguments.out,
         authenticated=True,
     )
-    with HyphaeClient.local_authenticated(str(socket_path), key) as raw_client:
-        client = BoundedRecordingClient(raw_client, RequestOptions)
-        replay_documents = [ingestor._document(item, GENERATION) for item in prepared.chunks]
-        replay = client.search_ingest(
+    with HyphaeClient.local_authenticated(str(second["socket_path"]), second["key"]) as raw_client2:
+        client2 = BoundedRecordingClient(raw_client2, RequestOptions)
+        replay_documents = [ingestor2._document(item, GENERATION) for item in prepared.chunks]
+        replay = client2.search_ingest(
             13,
             {
                 "idempotency_id": _u128_idempotency(prepared.idempotency_key),
@@ -531,7 +574,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         router = GenerationRoutedRetriever(
             tenant=TENANT,
             authority=authority,
-            client=client,
+            client=client2,
             profile=HYPHAE_210_RETRIEVAL_PROFILE,
             embedder=embedder,
             request_options_factory=lambda timeout: RequestOptions(
@@ -551,9 +594,9 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             search_steps_used=1,
             device=device,
         )
-        branch = (client.last_search or {}).get("vector_branches", [{}])[0]
+        branch = (client2.last_search or {}).get("vector_branches", [{}])[0]
         raw_scores = [
-            float(hit.get("score", 0)) for hit in (client.last_search or {}).get("hits", [])
+            float(hit.get("score", 0)) for hit in (client2.last_search or {}).get("hits", [])
         ]
         steps = [
             {
@@ -602,11 +645,12 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
                 "version": binary_version,
                 "sdk_version": hyphae_sdk.__version__,
                 "protocol": [PROTOCOL_MAJOR, PROTOCOL_MINOR],
-                "backend_id": backend_id,
+                "backend_id": backend_id2,
+                "distractor_backend_id": backend_id,
                 "collection_definition_sha256": COLLECTION_SHA256,
                 "durability": "strict",
                 "strategy": branch.get("strategy"),
-                "approximate": (client.last_search or {}).get("approximate"),
+                "approximate": (client2.last_search or {}).get("approximate"),
                 "exact_reranked": branch.get("exact_reranked"),
                 "restart_replay": replay.value.get("idempotent_replay"),
                 "raw_scores": raw_scores,
