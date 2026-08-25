@@ -118,6 +118,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-rezero-v1",
             "train-gemma4-e4b-rezero-v2",
             "train-gemma4-e4b-rezero-v3",
+            "train-gemma4-e4b-rezero-v4",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "shadow-gemma4-e4b-rezero-v1",
@@ -139,6 +140,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-rezero-v1",
                 "train-gemma4-e4b-rezero-v2",
                 "train-gemma4-e4b-rezero-v3",
+                "train-gemma4-e4b-rezero-v4",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "shadow-gemma4-e4b-rezero-v1",
@@ -175,6 +177,8 @@ class CloudCampaignPlan:
             _validate_gemma_rezero_v2_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-rezero-v3":
             _validate_gemma_rezero_v3_training_command(self.campaign_command)
+        if self.campaign_command[0] == "train-gemma4-e4b-rezero-v4":
+            _validate_gemma_rezero_v4_training_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v1":
             _validate_gemma_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v2":
@@ -541,6 +545,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-rezero-v1",
         "train-gemma4-e4b-rezero-v2",
         "train-gemma4-e4b-rezero-v3",
+        "train-gemma4-e4b-rezero-v4",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "shadow-gemma4-e4b-rezero-v1",
@@ -582,6 +587,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
             "train-gemma4-e4b-rezero-v1",
             "train-gemma4-e4b-rezero-v2",
             "train-gemma4-e4b-rezero-v3",
+            "train-gemma4-e4b-rezero-v4",
         }:
             rezero_version = plan.campaign_command[0].rsplit("-", 1)[-1]
             command = [
@@ -1384,6 +1390,15 @@ def _validate_gemma_rezero_v3_training_command(command: tuple[str, ...]) -> None
         "8",
     ):
         raise ValueError("Gemma E4B ReZero v3 training command differs from preregistration")
+
+
+def _validate_gemma_rezero_v4_training_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "train-gemma4-e4b-rezero-v4",
+        "--feature-batch-size",
+        "8",
+    ):
+        raise ValueError("Gemma E4B ReZero v4 training command differs from preregistration")
 
 
 def _validate_gemma_shadow_command(command: tuple[str, ...]) -> None:

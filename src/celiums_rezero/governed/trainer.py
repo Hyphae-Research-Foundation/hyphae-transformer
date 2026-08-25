@@ -32,6 +32,7 @@ class ControlTrainConfig:
     optimizer: str = "adamw"
     weight_decay: float = 0.01
     pointer_loss_scope: str = "all"
+    checkpoint_selection: str = "final"
 
     def __post_init__(self) -> None:
         values = (self.learning_rate, self.evidence_loss_weight, self.gradient_clip)
@@ -43,6 +44,8 @@ class ControlTrainConfig:
             raise ValueError("control weight decay is invalid")
         if self.pointer_loss_scope not in {"all", "answer"}:
             raise ValueError("control pointer loss scope is invalid")
+        if self.checkpoint_selection not in {"final", "minimum_training_loss"}:
+            raise ValueError("control checkpoint selection is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,8 @@ class ControlTrainSummary:
     epochs: int
     checkpoint_sha256: str
     backbone_unchanged: bool
+    selected_epoch: int
+    selected_loss: float
 
 
 def train_control_head(
@@ -92,6 +97,10 @@ def train_control_head(
     before = canonical_json(backbone.identity)
     state_before = backbone.state_fingerprint()
     losses: list[float] = []
+    selected_state: dict[str, torch.Tensor] | None = None
+    selected_optimizer: dict[str, object] | None = None
+    selected_epoch = config.epochs
+    selected_loss = float("inf")
     if batch is None:
         batch = make_batch(
             records,
@@ -138,13 +147,27 @@ def train_control_head(
         if any(not torch.isfinite(parameter).all() for parameter in head.parameters()):
             raise RuntimeError("control head parameter is non-finite")
         losses.append(float(loss.detach()))
+        if config.checkpoint_selection == "minimum_training_loss" and losses[-1] < selected_loss:
+            selected_loss = losses[-1]
+            selected_epoch = len(losses)
+            selected_state = {
+                name: tensor.detach().cpu().clone() for name, tensor in head.state_dict().items()
+            }
+            selected_optimizer = optimizer.state_dict()
+    if config.checkpoint_selection == "minimum_training_loss":
+        if selected_state is None or selected_optimizer is None:
+            raise RuntimeError("minimum-loss checkpoint was not captured")
+        head.load_state_dict(selected_state)
+    else:
+        selected_loss = losses[-1]
+        selected_optimizer = optimizer.state_dict()
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     temporary = checkpoint.with_suffix(".pt.tmp")
     torch.save(
         {
             "version": 1,
             "head": head.state_dict(),
-            "optimizer": optimizer.state_dict(),
+            "optimizer": selected_optimizer,
             "config": asdict(config),
             "backbone": before,
             "backbone_state": state_before,
@@ -170,4 +193,6 @@ def train_control_head(
             canonical_json(backbone.identity) == before
             and backbone.state_fingerprint() == state_before
         ),
+        selected_epoch=selected_epoch,
+        selected_loss=selected_loss,
     )
