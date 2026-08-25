@@ -406,6 +406,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         outcome = worker.run_next(job_id=pending.job_id)
         if outcome is None or outcome.receipt is None or outcome.job.status is not JobStatus.READY:
             raise RuntimeError("navigation distractor publication did not become ready")
+        authority.verify_candidate(distractor_manifest, (outcome.receipt,))
         distractor_activation = authority.activate(
             DISTRACTOR_GENERATION,
             expected_revision=0,
