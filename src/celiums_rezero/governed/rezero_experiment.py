@@ -291,7 +291,7 @@ def run_rezero_sequence_smoke(
         else torch.zeros((), device=device)
     )
     loss = action_loss + float(training["evidence_loss_weight"]) * pointer_loss
-    loss.backward()
+    torch.autograd.backward(loss)
     gate_parameters = [
         parameter for parameter in head.parameters() if is_gate_parameter(parameter)
     ]
