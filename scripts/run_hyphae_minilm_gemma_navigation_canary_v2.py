@@ -17,4 +17,10 @@ base.NAVIGATION_CHECKPOINT_SHA256 = (
 base.REPORT_SCHEMA = "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v2"
 
 if __name__ == "__main__":
-    raise SystemExit(base.main())
+    try:
+        raise SystemExit(base.main())
+    except BaseException:
+        import traceback
+
+        traceback.print_exc()
+        raise
