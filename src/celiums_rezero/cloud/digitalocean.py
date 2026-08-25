@@ -19,6 +19,7 @@ from typing import Protocol
 CLEANUP_RESERVE_SECONDS = 300
 ROCM_PYTORCH_IMAGE = "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1"
 BUNDLE_SHA256 = "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be"
+REZERO_BUNDLE_SHA256 = "10da3a479058cc94967f510fcbf979af759cf9ca11e18bec1209312606dfe670"
 HYPHAE_WHEEL_SHA256 = "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb"
 HYPHAE_WHEEL_BYTES = 87_754
 UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-v1"
@@ -116,6 +117,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-rezero-v1",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
+            "shadow-gemma4-e4b-rezero-v1",
             "canary-gemma4-e4b-quoted-runtime-v1",
             UNIFIED_CAMPAIGN,
         }:
@@ -133,6 +135,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-rezero-v1",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
+                "shadow-gemma4-e4b-rezero-v1",
                 "canary-gemma4-e4b-quoted-runtime-v1",
                 UNIFIED_CAMPAIGN,
             }
@@ -165,6 +168,8 @@ class CloudCampaignPlan:
             _validate_gemma_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v2":
             _validate_gemma_shadow_v2_command(self.campaign_command)
+        if self.campaign_command[0] == "shadow-gemma4-e4b-rezero-v1":
+            _validate_gemma_rezero_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1":
             _validate_gemma_quoted_runtime_command(self.campaign_command)
         if self.campaign_command[0] == UNIFIED_CAMPAIGN and (
@@ -523,6 +528,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-rezero-v1",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
+        "shadow-gemma4-e4b-rezero-v1",
         "canary-gemma4-e4b-quoted-runtime-v1",
         UNIFIED_CAMPAIGN,
     }:
@@ -588,6 +594,25 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 (
                     "/workspace/experiments/canonical/"
                     f"gemma4_e4b_governed_control_{version}.json"
+                ),
+                "--out",
+                "/runs",
+                *plan.campaign_command[1:],
+            ]
+        elif plan.campaign_command[0] == "shadow-gemma4-e4b-rezero-v1":
+            command = [
+                "python",
+                "/workspace/scripts/run_gemma4_e4b_shadow.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--bundle",
+                "/data/gemma4-e4b-rezero-control-v1-seed17.tar.gz",
+                "--cases",
+                "/workspace/experiments/shadow/external-v1/cases.jsonl",
+                "--preregistration",
+                (
+                    "/workspace/experiments/canonical/"
+                    "gemma4_e4b_rezero_shadow_external_v1.json"
                 ),
                 "--out",
                 "/runs",
@@ -862,6 +887,21 @@ def _rocm_bootstrap_inner(plan: CloudCampaignPlan) -> str:
                     "PYTHONPATH=/workspace/src:/python python "
                     "/workspace/scripts/download_minilm_l6_v2.py "
                     "--out /data/all-MiniLM-L6-v2 | tee /runs/minilm-preflight.json"
+                ),
+            ]
+        )
+    if plan.campaign_command[0] == "shadow-gemma4-e4b-rezero-v1":
+        commands.extend(
+            [
+                (
+                    "curl -LsSf -o /data/gemma4-e4b-rezero-control-v1-seed17.tar.gz "
+                    "https://github.com/Hyphae-Research-Foundation/hyphae-transformer/"
+                    "releases/download/rezero-control-v1.0.0/"
+                    "gemma4-e4b-rezero-control-v1-seed17.tar.gz"
+                ),
+                (
+                    f"echo '{REZERO_BUNDLE_SHA256}  "
+                    "/data/gemma4-e4b-rezero-control-v1-seed17.tar.gz' | sha256sum -c -"
                 ),
             ]
         )
@@ -1304,6 +1344,15 @@ def _validate_gemma_shadow_v2_command(command: tuple[str, ...]) -> None:
         "93db742ead71c12fa46c62661b12108fdb0a815d3b5fcf180821538dcfc8b9be",
     ):
         raise ValueError("Gemma E4B shadow v2 command differs from preregistration")
+
+
+def _validate_gemma_rezero_shadow_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "shadow-gemma4-e4b-rezero-v1",
+        "--bundle-sha256",
+        REZERO_BUNDLE_SHA256,
+    ):
+        raise ValueError("Gemma E4B ReZero shadow command differs from preregistration")
 
 
 def _validate_gemma_quoted_runtime_command(command: tuple[str, ...]) -> None:

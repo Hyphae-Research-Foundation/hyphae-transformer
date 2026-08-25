@@ -15,6 +15,7 @@ import torch
 from celiums_rezero.governed.deployment import (
     AuditedShadowObserver,
     load_deployment_bundle,
+    load_rezero_deployment_bundle,
 )
 from celiums_rezero.governed.gemma4 import Gemma4E4BFrozenBackbone
 from celiums_rezero.governed.schemas import ControlAction
@@ -58,7 +59,12 @@ def run_shadow_campaign(
         raise ValueError("shadow bundle digest differs from preregistration")
     device = torch.device("cuda:0")
     backbone = Gemma4E4BFrozenBackbone(model, device=str(device))
-    controller = load_deployment_bundle(
+    loader = (
+        load_rezero_deployment_bundle
+        if prereg.get("controller_kind") == "rezero_sequence_control_v1"
+        else load_deployment_bundle
+    )
+    controller = loader(
         bundle,
         expected_bundle_sha256=bundle_sha256,
         backbone=backbone,

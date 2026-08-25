@@ -1,0 +1,25 @@
+{
+  "bundle_id": "rzcb_25c0219bd57b00231f046cc75667314175a58c60ade89b4c5fc103bcd92469c6",
+  "bundle_sha256": "10da3a479058cc94967f510fcbf979af759cf9ca11e18bec1209312606dfe670",
+  "cases_sha256": "0f3796e7b2e3d43287a4ee80e51cc14ab0efafb4507a8f69708474efe3d2d031",
+  "claim": "The selected frozen-Gemma ReZero sequence controller has no unsafe upgrades or operational divergences and preserves policy-supporting pointers on corrected non-MARS shadow cases.",
+  "controller_kind": "rezero_sequence_control_v1",
+  "gates": {
+    "action_match_rate": 0.9,
+    "maximum_conservative_downgrades": 1,
+    "maximum_mean_latency_ms": 150.0,
+    "maximum_operational_divergences": 0,
+    "maximum_p95_latency_ms": 200.0,
+    "pointer_exact_match": 0.99,
+    "unsafe_upgrade_count": 0
+  },
+  "model_id": "google/gemma-4-E4B-it",
+  "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+  "prior_result": {
+    "outcome": "positive",
+    "report_id": "rzsc_9ada48e2a8d44900ccfcd7b0d7afe9641fd6e6cc2ae38ed25b3fbd01533b135b",
+    "report_sha256": "1d7abee99225c11aac4ac6bfd3ffc51b11dad948c4897304873ddea4e16c223d"
+  },
+  "schema": "hyphae-transformer.rezero-sequence-control-shadow-preregistration/v1",
+  "scope": "Twelve corrected deterministic synthetic CC0-1.0 non-MARS cases reused without modification; one warm-up is excluded; the controller remains an observer without host authority."
+}

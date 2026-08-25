@@ -1,0 +1,21 @@
+{
+  "accelerator": "amd-rocm",
+  "artifact_directory": "artifacts/gemma4-e4b-mi355x1-rezero-shadow-v1",
+  "campaign_command": [
+    "shadow-gemma4-e4b-rezero-v1",
+    "--bundle-sha256",
+    "10da3a479058cc94967f510fcbf979af759cf9ca11e18bec1209312606dfe670"
+  ],
+  "data_command": ["prepare-gemma4-e4b"],
+  "hourly_rate_usd": 4.5,
+  "image": "amddevelopercloud-pytorch2100rocm724",
+  "max_cost_usd": 9.0,
+  "max_lifetime_seconds": 7200,
+  "name": "hyphae-e4b-rezero-shadow-v1",
+  "region": "mem1",
+  "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
+  "revision": "replace-with-merged-40-character-commit-sha",
+  "size": "gpu-mi355x1-288gb-spot",
+  "ssh_key_id": "55649085",
+  "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
+}

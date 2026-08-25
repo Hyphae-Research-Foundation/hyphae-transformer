@@ -4,10 +4,14 @@ from celiums_rezero.governed.backbone import FixtureBackboneV1, PinnedBackboneId
 from celiums_rezero.governed.deployment import (
     AuditedShadowObserver,
     GovernedShadowController,
+    ReZeroDeploymentBundleManifest,
     ShadowControlResult,
     build_deployment_bundle,
+    build_rezero_deployment_bundle,
     inspect_deployment_bundle,
+    inspect_rezero_deployment_bundle,
     load_deployment_bundle,
+    load_rezero_deployment_bundle,
 )
 from celiums_rezero.governed.model import GovernedControlHead, ReZeroSequenceControlHead
 from celiums_rezero.governed.schemas import ControlAction, ControlTarget, TrajectoryStep
@@ -22,11 +26,15 @@ __all__ = [
     "GovernedControlHead",
     "GovernedShadowController",
     "PinnedBackboneIdentity",
+    "ReZeroDeploymentBundleManifest",
     "ReZeroSequenceControlHead",
     "ShadowControlResult",
     "TrajectoryStep",
     "build_deployment_bundle",
+    "build_rezero_deployment_bundle",
     "inspect_deployment_bundle",
+    "inspect_rezero_deployment_bundle",
     "load_deployment_bundle",
+    "load_rezero_deployment_bundle",
     "train_control_head",
 ]
