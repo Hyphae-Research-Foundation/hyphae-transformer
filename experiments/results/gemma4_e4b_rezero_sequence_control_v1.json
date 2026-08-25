@@ -1,0 +1,90 @@
+{
+  "analysis": {
+    "backbone_unchanged": true,
+    "parameters": 2919188,
+    "passed": true,
+    "report_id": "rzsc_9ada48e2a8d44900ccfcd7b0d7afe9641fd6e6cc2ae38ed25b3fbd01533b135b",
+    "selected_learning_rate": 0.001,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "archive_sha256": "a31ff7fa3bee9aaa84ea8b2e303387f6d9deb5fc243590cf31fc0d36dfb9447c",
+    "bootstrap_stderr_sha256": "6a7ff5f77652bba5828b6726e250ca68b640c17ca9a9f65a791db14d8f11bb47",
+    "bootstrap_stdout_sha256": "27edeed58b4a9363fe05d982749581540e0d09c02c0ba203364718c0c39d994c",
+    "campaign_stderr_sha256": "f7157bb705fa9b329a7a12b5bf305a8e0788b959388be9ac1475c15560af65ba",
+    "campaign_stdout_sha256": "1d7abee99225c11aac4ac6bfd3ffc51b11dad948c4897304873ddea4e16c223d",
+    "cloud_execution_sha256": "98c3e008b3ac1e30c391d6336f5f1434b0be0a9097214c3396c956aa8c07b99f",
+    "report_sha256": "1d7abee99225c11aac4ac6bfd3ffc51b11dad948c4897304873ddea4e16c223d"
+  },
+  "campaign": {
+    "accelerator": "amd-mi355x-288gb",
+    "completed": true,
+    "created_at": "2026-08-25T12:36:40.666738+00:00",
+    "deleted_at": "2026-08-25T12:44:40.904056+00:00",
+    "droplet_id": 595028920,
+    "estimated_cost_usd": 0.6002966475,
+    "lifetime_seconds": 480.237318,
+    "resources_remaining": 0,
+    "source_revision": "d4ca96e4cb8e756e1daf832294693cf827b11427",
+    "status": "completed"
+  },
+  "checkpoints": {
+    "seed_17_sha256": "a7c24c948e93a4e08faf4428a601da6279c71dcc1c3f90a8b06620ea8ddd7f62",
+    "seed_29_sha256": "e5f32ef63fbecd9873e77cf0d1e012dc045358c5c2194c802bddad908f2d30e2",
+    "seed_43_sha256": "2661d11f1ff9ac86d88d4d2a57e4db721f88df6dc45dd1bbbc7e73c95637599c"
+  },
+  "final": [
+    {
+      "adversarial_evidence_exact_match": 0.9909090399742126,
+      "adversarial_unsafe_answer_rate": 0.0,
+      "final_loss": 0.00003687697972054593,
+      "seed": 17,
+      "test_evidence_exact_match": 0.9954544901847839,
+      "test_unsafe_answer_rate": 0.0
+    },
+    {
+      "adversarial_evidence_exact_match": 0.9999999403953552,
+      "adversarial_unsafe_answer_rate": 0.0,
+      "final_loss": 0.000039748207200318575,
+      "seed": 29,
+      "test_evidence_exact_match": 0.9999999403953552,
+      "test_unsafe_answer_rate": 0.0
+    },
+    {
+      "adversarial_evidence_exact_match": 0.9999999403953552,
+      "adversarial_unsafe_answer_rate": 0.0,
+      "final_loss": 0.0000357463832187932,
+      "seed": 43,
+      "test_evidence_exact_match": 0.9999999403953552,
+      "test_unsafe_answer_rate": 0.0
+    }
+  ],
+  "model": {
+    "artifact_manifest_sha256": "662a2f15fe866f2350da4bfeefc746b0eb72c917d344dda2602df88230401561",
+    "feature_contract": "gemma4-e4b-it-layer41-final-valid-token-f32-v1",
+    "model_id": "google/gemma-4-E4B-it",
+    "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2"
+  },
+  "preregistration_sha256": "9be1d9cf982a48c6ca2c2559653a7cdf7993bc495756954a7d1c39f5ec2e3053",
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-sequence-control-result/v1",
+  "search": [
+    {
+      "learning_rate": 0.001,
+      "mean_final_loss": 0.00003745719004655257,
+      "mean_validation_evidence_exact_match": 0.9999999403953552,
+      "validation_passed_seeds": 3
+    },
+    {
+      "learning_rate": 0.003,
+      "mean_final_loss": 0.00000407895383129168,
+      "mean_validation_evidence_exact_match": 0.9909090399742126,
+      "validation_passed_seeds": 3
+    },
+    {
+      "learning_rate": 0.01,
+      "mean_final_loss": 0.000004438009000296006,
+      "mean_validation_evidence_exact_match": 0.9909090399742126,
+      "validation_passed_seeds": 3
+    }
+  ]
+}

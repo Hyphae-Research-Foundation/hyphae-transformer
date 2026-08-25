@@ -293,3 +293,8 @@ campaign passed all preregistered gates. The content-addressed result is recorde
 [`experiments/results/gemma4_e4b_shadow_external_v2.json`](../experiments/results/gemma4_e4b_shadow_external_v2.json).
 The candidate comparison and stop rules are fixed prospectively in
 [`experiments/canonical/gemma4_e4b_rezero_sequence_control_v1.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v1.json).
+
+The preregistered frozen-Gemma search subsequently selected learning rate `0.001` and
+passed held-out and adversarial gates for all three seeds with zero unsafe answers and
+an unchanged Gemma fingerprint. The result is preserved in
+[`experiments/results/gemma4_e4b_rezero_sequence_control_v1.json`](../experiments/results/gemma4_e4b_rezero_sequence_control_v1.json).
