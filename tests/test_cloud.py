@@ -688,8 +688,8 @@ def test_rezero_unified_plan_uses_pinned_bundle_and_controller(tmp_path: Path) -
     wheel.write_bytes(source.read_bytes())
     cloud_plan = rezero_unified_plan(tmp_path, wheel)
     commands = digitalocean.planned_commands(cloud_plan)
-    bootstrap = commands[1][-1]
-    campaign = commands[2][-1]
+    bootstrap = commands[2][-1]
+    campaign = commands[3][-1]
     assert "rezero-control-v4.0.0" in bootstrap
     assert "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121" in bootstrap
     assert "--controller-kind rezero-v4" in campaign
@@ -785,6 +785,47 @@ def rezero_unified_plan(tmp_path: Path, wheel: Path) -> CloudCampaignPlan:
         name="hyphae-minilm-gemma-rezero-canary-v1",
         campaign_command=("canary-hyphae-minilm-gemma-rezero-v1",),
         artifact_directory=tmp_path / "rezero-unified-evidence",
+    )
+    return CloudCampaignPlan(**values)
+
+
+def test_navigation_unified_plan_downloads_pinned_pilot(tmp_path: Path) -> None:
+    wheel = tmp_path / "hyphae_sdk-2.1.0-py3-none-any.whl"
+    source = Path(
+        "/tmp/opencode/hyphae-v210-artifacts/wheel/"
+        "hyphae_sdk-2.1.0-py3-none-any.whl"
+    )
+    if not source.is_file():
+        pytest.skip("exact Hyphae wheel is unavailable")
+    wheel.write_bytes(source.read_bytes())
+    cloud_plan = navigation_unified_plan(tmp_path, wheel)
+    commands = digitalocean.planned_commands(cloud_plan)
+    bootstrap = commands[2][-1]
+    campaign = commands[3][-1]
+    assert "rezero-navigation-v1.0.0" in bootstrap
+    assert "5cb0381c03f944706819e6c5ce2d9dc71be63c27b88292cfd28fd2b489d7b7c8" in bootstrap
+    assert "run_hyphae_minilm_gemma_navigation_canary.py" in campaign
+    assert "--network=none" in " ".join(commands[3])
+    with pytest.raises(ValueError, match="unified campaign"):
+        CloudCampaignPlan(
+            **{
+                field: getattr(cloud_plan, field)
+                for field in CloudCampaignPlan.__dataclass_fields__
+                if field != "campaign_command"
+            },
+            campaign_command=("canary-hyphae-minilm-gemma-navigation-v1", "extra"),
+        )
+
+
+def navigation_unified_plan(tmp_path: Path, wheel: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(unified_plan(tmp_path, wheel), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-minilm-gemma-navigation-canary-v1",
+        campaign_command=("canary-hyphae-minilm-gemma-navigation-v1",),
+        artifact_directory=tmp_path / "navigation-unified-evidence",
     )
     return CloudCampaignPlan(**values)
 
