@@ -81,6 +81,17 @@ did not clear the preregistered minimum versus one shared gate. See
 [`docs/research-program.md`](docs/research-program.md) for the evidence and stop
 decision.
 
+The governed-model track keeps Gemma 4 E4B frozen and trains a bounded action and
+evidence-pointer controller. Its v3 bundle passed held-out, adversarial, and corrected
+external shadow gates; the shadow result is recorded in
+[`experiments/results/gemma4_e4b_shadow_external_v2.json`](experiments/results/gemma4_e4b_shadow_external_v2.json).
+This is control-head training, not Gemma fine-tuning.
+
+The first prospective bridge from that controller to the validated ReZero architecture
+is documented in [`docs/rezero-gemma-roadmap.md`](docs/rezero-gemma-roadmap.md). It
+keeps Gemma frozen and tests shared-gate ReZero blocks over the bounded context and
+evidence feature sequence before any multi-step navigation work is authorized.
+
 The Python import namespace remains `celiums_rezero`, and the legacy
 `celiums-rezero`/`celiums-knowledge` commands remain available during the compatibility
 window. Historical manifests, checkpoints, protocol identifiers, metric names and

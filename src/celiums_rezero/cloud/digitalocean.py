@@ -108,9 +108,11 @@ class CloudCampaignPlan:
             "pilot-wikitext2",
             "pilot-enwiki8",
             "smoke-gemma4-e4b",
+            "smoke-gemma4-e4b-rezero-v1",
             "train-gemma4-e4b",
             "train-gemma4-e4b-v2",
             "train-gemma4-e4b-v3",
+            "train-gemma4-e4b-rezero-v1",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "canary-gemma4-e4b-quoted-runtime-v1",
@@ -123,9 +125,11 @@ class CloudCampaignPlan:
             self.campaign_command[0]
             in {
                 "smoke-gemma4-e4b",
+                "smoke-gemma4-e4b-rezero-v1",
                 "train-gemma4-e4b",
                 "train-gemma4-e4b-v2",
                 "train-gemma4-e4b-v3",
+                "train-gemma4-e4b-rezero-v1",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "canary-gemma4-e4b-quoted-runtime-v1",
@@ -146,12 +150,16 @@ class CloudCampaignPlan:
             raise ValueError("Gemma E4B preparation does not accept plan arguments")
         if self.campaign_command[0] == "smoke-gemma4-e4b":
             _validate_gemma_smoke_command(self.campaign_command)
+        if self.campaign_command[0] == "smoke-gemma4-e4b-rezero-v1":
+            _validate_gemma_rezero_smoke_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b":
             _validate_gemma_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-v2":
             _validate_gemma_v2_training_command(self.campaign_command)
         if self.campaign_command[0] == "train-gemma4-e4b-v3":
             _validate_gemma_v3_training_command(self.campaign_command)
+        if self.campaign_command[0] == "train-gemma4-e4b-rezero-v1":
+            _validate_gemma_rezero_training_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v1":
             _validate_gemma_shadow_command(self.campaign_command)
         if self.campaign_command[0] == "shadow-gemma4-e4b-v2":
@@ -500,9 +508,11 @@ def _bootstrap_script(plan: CloudCampaignPlan) -> str:
 def _campaign_script(plan: CloudCampaignPlan) -> str:
     if plan.campaign_command[0] in {
         "smoke-gemma4-e4b",
+        "smoke-gemma4-e4b-rezero-v1",
         "train-gemma4-e4b",
         "train-gemma4-e4b-v2",
         "train-gemma4-e4b-v3",
+        "train-gemma4-e4b-rezero-v1",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "canary-gemma4-e4b-quoted-runtime-v1",
@@ -519,6 +529,40 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/workspace/experiments/governed/mars-v2-e4b-v1",
                 "--out",
                 "/runs/gemma4-e4b-smoke.json",
+                *plan.campaign_command[1:],
+            ]
+        elif plan.campaign_command[0] == "smoke-gemma4-e4b-rezero-v1":
+            command = [
+                "python",
+                "/workspace/scripts/smoke_gemma4_e4b_rezero_control.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--dataset",
+                "/workspace/experiments/governed/mars-v2-e4b-v1",
+                "--preregistration",
+                (
+                    "/workspace/experiments/canonical/"
+                    "gemma4_e4b_rezero_sequence_control_v1.json"
+                ),
+                "--out",
+                "/runs/gemma4-e4b-rezero-smoke.json",
+                *plan.campaign_command[1:],
+            ]
+        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-v1":
+            command = [
+                "python",
+                "/workspace/scripts/train_gemma4_e4b_rezero_control.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--dataset",
+                "/workspace/experiments/governed/mars-v2-e4b-v1",
+                "--preregistration",
+                (
+                    "/workspace/experiments/canonical/"
+                    "gemma4_e4b_rezero_sequence_control_v1.json"
+                ),
+                "--out",
+                "/runs",
                 *plan.campaign_command[1:],
             ]
         elif plan.campaign_command[0].startswith("train-gemma4-e4b"):
@@ -654,6 +698,8 @@ def _artifact_command(plan: CloudCampaignPlan, public_ip: str) -> list[str]:
                 f"tar --ignore-failed-read -C {plan.remote_run_root} -czf - {members} "
                 "| base64 -w0"
             )
+        elif plan.campaign_command[0] == "smoke-gemma4-e4b-rezero-v1":
+            artifact = f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-rezero-smoke.json"
         else:
             artifact = f"base64 -w0 {plan.remote_run_root}/gemma4-e4b-smoke.json"
         return _ssh_command(
@@ -713,6 +759,8 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
         if plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1"
         else "hyphae-minilm-gemma-evidence.tar.gz"
         if plan.campaign_command[0] == UNIFIED_CAMPAIGN
+        else "gemma4-e4b-rezero-smoke.json"
+        if plan.campaign_command[0] == "smoke-gemma4-e4b-rezero-v1"
         else "gemma4-e4b-smoke.json"
     )
 
@@ -820,7 +868,12 @@ def _write_retrieved_evidence(
         completed = True
         if plan.campaign_command[0].startswith("train-gemma4-e4b"):
             with tarfile.open(fileobj=BytesIO(payload), mode="r:gz") as archive:
-                member = archive.getmember("./training-report.json")
+                report_name = (
+                    "./rezero-sequence-report.json"
+                    if plan.campaign_command[0] == "train-gemma4-e4b-rezero-v1"
+                    else "./training-report.json"
+                )
+                member = archive.getmember(report_name)
                 source = archive.extractfile(member)
                 if source is None or not member.isfile():
                     raise ValueError("training report is absent")
@@ -855,14 +908,26 @@ def _write_retrieved_evidence(
             completed = _valid_unified_report(value, plan)
         else:
             value = json.loads(payload)
-            completed = isinstance(value, dict) and value.get("passed") is True
+            completed = (
+                isinstance(value, dict)
+                and value.get("passed") is True
+                and (
+                    plan.campaign_command[0] == "smoke-gemma4-e4b"
+                    or value.get("completed") is True
+                )
+            )
     except (ValueError, KeyError, json.JSONDecodeError, tarfile.TarError) as error:
         raise RuntimeError("retrieved cloud campaign evidence is invalid") from error
     if not completed:
         raise RuntimeError("retrieved cloud campaign evidence did not complete")
     (plan.artifact_directory / _expected_artifact_name(plan)).write_bytes(payload)
     if plan.campaign_command[0].startswith("train-gemma4-e4b"):
-        (plan.artifact_directory / "training-report.json").write_text(
+        report_name = (
+            "rezero-sequence-report.json"
+            if plan.campaign_command[0] == "train-gemma4-e4b-rezero-v1"
+            else "training-report.json"
+        )
+        (plan.artifact_directory / report_name).write_text(
             json.dumps(value, indent=2, sort_keys=True) + "\n"
         )
     elif plan.campaign_command[0].startswith("shadow-gemma4-e4b"):
@@ -1091,6 +1156,17 @@ def _validate_gemma_smoke_command(command: tuple[str, ...]) -> None:
         raise ValueError("Gemma E4B smoke command differs from preregistration")
 
 
+def _validate_gemma_rezero_smoke_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "smoke-gemma4-e4b-rezero-v1",
+        "--feature-batch-size",
+        "8",
+        "--max-vram-gib",
+        "240",
+    ):
+        raise ValueError("Gemma E4B ReZero smoke command differs from preregistration")
+
+
 def _validate_gemma_training_command(command: tuple[str, ...]) -> None:
     if command != (
         "train-gemma4-e4b",
@@ -1160,6 +1236,15 @@ def _validate_gemma_v3_training_command(command: tuple[str, ...]) -> None:
         "0.5",
     ):
         raise ValueError("Gemma E4B v3 training command differs from preregistration")
+
+
+def _validate_gemma_rezero_training_command(command: tuple[str, ...]) -> None:
+    if command != (
+        "train-gemma4-e4b-rezero-v1",
+        "--feature-batch-size",
+        "8",
+    ):
+        raise ValueError("Gemma E4B ReZero training command differs from preregistration")
 
 
 def _validate_gemma_shadow_command(command: tuple[str, ...]) -> None:

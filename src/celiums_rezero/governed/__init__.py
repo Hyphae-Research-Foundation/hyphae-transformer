@@ -9,7 +9,7 @@ from celiums_rezero.governed.deployment import (
     inspect_deployment_bundle,
     load_deployment_bundle,
 )
-from celiums_rezero.governed.model import GovernedControlHead
+from celiums_rezero.governed.model import GovernedControlHead, ReZeroSequenceControlHead
 from celiums_rezero.governed.schemas import ControlAction, ControlTarget, TrajectoryStep
 from celiums_rezero.governed.trainer import ControlTrainConfig, train_control_head
 
@@ -22,6 +22,7 @@ __all__ = [
     "GovernedControlHead",
     "GovernedShadowController",
     "PinnedBackboneIdentity",
+    "ReZeroSequenceControlHead",
     "ShadowControlResult",
     "TrajectoryStep",
     "build_deployment_bundle",

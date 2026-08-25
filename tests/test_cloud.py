@@ -56,6 +56,7 @@ class FakeRunner:
         fail_create: bool = False,
         fail_delete: bool = False,
         quoted_runtime: bool = False,
+        rezero_training: bool = False,
         inventory_responses: list[subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self.commands: list[list[str]] = []
@@ -63,6 +64,7 @@ class FakeRunner:
         self.fail_create = fail_create
         self.fail_delete = fail_delete
         self.quoted_runtime = quoted_runtime
+        self.rezero_training = rezero_training
         self.inventory_responses = inventory_responses or []
 
     def run(
@@ -96,7 +98,9 @@ class FakeRunner:
         if command[0] == "ssh" and "diff --binary -- . | sha256sum" in command[-1]:
             return subprocess.CompletedProcess(command, 0, f"{'a' * 64}  source.patch\n", "")
         if command[0] == "ssh" and command[-1].startswith("base64 -w0 "):
-            payload = base64.b64encode(json.dumps({"passed": True}).encode()).decode()
+            payload = base64.b64encode(
+                json.dumps({"completed": True, "passed": True}).encode()
+            ).decode()
             return subprocess.CompletedProcess(command, 0, payload, "")
         if command[0] == "ssh" and command[-1].startswith("tar -C "):
             import io
@@ -105,6 +109,8 @@ class FakeRunner:
             report_name = (
                 "./quoted-runtime-canary-report.json"
                 if self.quoted_runtime
+                else "./rezero-sequence-report.json"
+                if self.rezero_training
                 else "shadow-report.json"
                 if "shadow" in command[-1]
                 else "./training-report.json"
@@ -434,6 +440,39 @@ def test_gemma_v3_training_plan_is_strict(tmp_path: Path) -> None:
     )
     assert "gemma4_e4b_governed_control_v3.json" in campaign
     assert "--epochs 200" in campaign
+
+
+def test_gemma_rezero_smoke_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_rezero_smoke_plan(tmp_path)
+    runner = FakeRunner()
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "smoke_gemma4_e4b_rezero_control.py" in command[-1]
+    )
+    assert "gemma4_e4b_rezero_sequence_control_v1.json" in campaign
+    assert "--feature-batch-size 8" in campaign
+    assert (cloud_plan.artifact_directory / "gemma4-e4b-rezero-smoke.json").is_file()
+
+
+def test_gemma_rezero_training_plan_is_strict(tmp_path: Path) -> None:
+    cloud_plan = gemma_rezero_training_plan(tmp_path)
+    runner = FakeRunner(rezero_training=True)
+    summary = execute_digitalocean_campaign(
+        cloud_plan, runner=runner, sleep=lambda _: None
+    )
+    assert summary.status == "completed"
+    campaign = next(
+        command[-1]
+        for command in runner.commands
+        if command[0] == "ssh" and "train_gemma4_e4b_rezero_control.py" in command[-1]
+    )
+    assert "gemma4_e4b_rezero_sequence_control_v1.json" in campaign
+    assert (cloud_plan.artifact_directory / "rezero-sequence-report.json").is_file()
 
 
 def test_gemma_shadow_plan_is_strict(tmp_path: Path) -> None:
@@ -780,5 +819,41 @@ def gemma_shadow_v2_plan(tmp_path: Path) -> CloudCampaignPlan:
     values.update(
         name="hyphae-e4b-shadow-external-v2",
         campaign_command=("shadow-gemma4-e4b-v2", *values["campaign_command"][1:]),
+    )
+    return CloudCampaignPlan(**values)
+
+
+def gemma_rezero_smoke_plan(tmp_path: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(gemma_shadow_plan(tmp_path), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-e4b-rezero-smoke-v1-x1",
+        campaign_command=(
+            "smoke-gemma4-e4b-rezero-v1",
+            "--feature-batch-size",
+            "8",
+            "--max-vram-gib",
+            "240",
+        ),
+        artifact_directory=tmp_path / "artifacts-rezero-smoke",
+    )
+    return CloudCampaignPlan(**values)
+
+
+def gemma_rezero_training_plan(tmp_path: Path) -> CloudCampaignPlan:
+    values = {
+        field: getattr(gemma_v3_training_plan(tmp_path), field)
+        for field in CloudCampaignPlan.__dataclass_fields__
+    }
+    values.update(
+        name="hyphae-e4b-rezero-control-v1-x1",
+        campaign_command=(
+            "train-gemma4-e4b-rezero-v1",
+            "--feature-batch-size",
+            "8",
+        ),
+        artifact_directory=tmp_path / "artifacts-rezero-training",
     )
     return CloudCampaignPlan(**values)

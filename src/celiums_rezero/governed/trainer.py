@@ -13,9 +13,10 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from celiums_rezero.core.gates import is_gate_parameter
+from celiums_rezero.core.optim import build_optimizer_groups
 from celiums_rezero.governed.backbone import FrozenTextBackbone
 from celiums_rezero.governed.data import GovernedBatch, make_batch
-from celiums_rezero.governed.model import GovernedControlHead
 from celiums_rezero.governed.schemas import TrajectoryStep
 from celiums_rezero.lab.serialization import canonical_json
 
@@ -56,7 +57,7 @@ class ControlTrainSummary:
 
 def train_control_head(
     backbone: FrozenTextBackbone,
-    head: GovernedControlHead,
+    head: nn.Module,
     records: tuple[TrajectoryStep, ...],
     config: ControlTrainConfig,
     *,
@@ -70,8 +71,19 @@ def train_control_head(
     torch.use_deterministic_algorithms(True)
     device = torch.device(config.device)
     head.to(device).train()
+    has_residual_gates = any(is_gate_parameter(parameter) for parameter in head.parameters())
     optimizer = (
         torch.optim.AdamW(
+            build_optimizer_groups(
+                head,
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+            ),
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay,
+        )
+        if config.optimizer == "adamw" and has_residual_gates
+        else torch.optim.AdamW(
             head.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
         )
         if config.optimizer == "adamw"

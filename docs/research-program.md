@@ -279,3 +279,17 @@ Combining the original RTX 4000 Ada seeds with the preregistered L40S extension,
 [+1.59%, +3.06%], clearing the +1% practical threshold. The primary verdict is
 **positive**. The 1.8-NLL token reduction was +17.5%, with a 95% interval of
 [+11.59%, +23.41%], also positive.
+
+## Governed Gemma Bridge
+
+The positive shared-gate result is now the promoted residual topology for the first
+governed Gemma integration experiment. This does not reinterpret the earlier language
+model result as a Gemma fine-tuning result. Gemma remains frozen; the prospective
+candidate applies `rezero_rms_shared` blocks only to the bounded sequence of Gemma
+context and supplied-evidence features.
+
+The baseline is the governed control v3 bundle, whose corrected external shadow v2
+campaign passed all preregistered gates. The content-addressed result is recorded in
+[`experiments/results/gemma4_e4b_shadow_external_v2.json`](../experiments/results/gemma4_e4b_shadow_external_v2.json).
+The candidate comparison and stop rules are fixed prospectively in
+[`experiments/canonical/gemma4_e4b_rezero_sequence_control_v1.json`](../experiments/canonical/gemma4_e4b_rezero_sequence_control_v1.json).

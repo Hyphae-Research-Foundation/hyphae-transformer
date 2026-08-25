@@ -6,12 +6,14 @@ from pathlib import Path
 
 import torch
 
+from celiums_rezero.core.gates import ReZeroGate
 from celiums_rezero.governed import (
     ControlAction,
     ControlTarget,
     ControlTrainConfig,
     FixtureBackboneV1,
     GovernedControlHead,
+    ReZeroSequenceControlHead,
     TrajectoryStep,
     train_control_head,
 )
@@ -240,3 +242,68 @@ def test_host_control_features_are_explicit_action_inputs() -> None:
         torch.tensor([[0.0, 0.0, 1.0, 0.0, 0.0]]),
     )
     assert logits.action_logits.argmax(-1).item() == 1
+
+
+def test_rezero_sequence_controller_uses_shared_zero_initialized_gates() -> None:
+    head = ReZeroSequenceControlHead(
+        8,
+        control_size=16,
+        n_layers=2,
+        n_heads=4,
+        maximum_evidence_items=3,
+    )
+    gates = [module for module in head.modules() if isinstance(module, ReZeroGate)]
+    assert len(gates) == 2
+    assert all(gate.value.item() == 0 for gate in gates)
+    assert all(block.attention_gate is block.mlp_gate for block in head.blocks)
+
+
+def test_rezero_sequence_controller_produces_bounded_control_logits() -> None:
+    head = ReZeroSequenceControlHead(
+        8,
+        control_size=16,
+        n_layers=2,
+        n_heads=4,
+        maximum_evidence_items=3,
+    )
+    logits = head(
+        torch.ones((2, 8)),
+        torch.ones((2, 3, 8)),
+        torch.tensor([[True, True, False], [False, False, False]]),
+        torch.tensor([[0.95, 0.4, 0.0], [0.0, 0.0, 0.0]]),
+        torch.tensor(
+            [[0.0, 0.0, 0.0, 0.95, 2.0], [0.0, 0.0, 1.0, 0.0, 0.0]]
+        ),
+    )
+    assert logits.action_logits.shape == (2, 3)
+    assert logits.evidence_logits.shape == (2, 3)
+    assert torch.isneginf(logits.evidence_logits[0, 2])
+    assert torch.isneginf(logits.evidence_logits[1]).all()
+    assert logits.evidence_logits[0, 0] > logits.evidence_logits[0, 1]
+
+
+def test_rezero_sequence_controller_trains_with_frozen_backbone(tmp_path: Path) -> None:
+    backbone = FixtureBackboneV1()
+    torch.manual_seed(17)
+    head = ReZeroSequenceControlHead(
+        backbone.hidden_size,
+        control_size=32,
+        n_layers=1,
+        n_heads=4,
+    )
+    summary = train_control_head(
+        backbone,
+        head,
+        records(),
+        ControlTrainConfig(epochs=2, learning_rate=0.01),
+        checkpoint=tmp_path / "rezero-sequence.pt",
+    )
+    assert summary.backbone_unchanged
+    assert summary.final_loss <= summary.initial_loss
+    checkpoint = torch.load(tmp_path / "rezero-sequence.pt", weights_only=True)
+    weight_decays = {
+        float(group["weight_decay"])
+        for group in checkpoint["optimizer"]["param_groups"]
+    }
+    assert weight_decays == {0.0, 0.01}
+    assert sum(parameter.numel() for parameter in head.parameters()) < 5_000_000

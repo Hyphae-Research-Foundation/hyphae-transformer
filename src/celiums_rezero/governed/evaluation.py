@@ -8,7 +8,7 @@ import torch
 
 from celiums_rezero.governed.backbone import FrozenTextBackbone
 from celiums_rezero.governed.data import GovernedBatch, make_batch
-from celiums_rezero.governed.model import GovernedControlHead, decode_control
+from celiums_rezero.governed.model import decode_control
 from celiums_rezero.governed.schemas import ControlAction, TrajectoryStep
 
 
@@ -25,7 +25,7 @@ class ControlEvaluation:
 @torch.inference_mode()
 def evaluate_control_head(
     backbone: FrozenTextBackbone,
-    head: GovernedControlHead,
+    head: torch.nn.Module,
     records: tuple[TrajectoryStep, ...],
     *,
     maximum_evidence_items: int = 8,
