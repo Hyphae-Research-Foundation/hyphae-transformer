@@ -123,3 +123,11 @@ protocol is
 The v2 search selected learning rate `0.0003`; every validation, test, and adversarial
 run passed with zero unsafe answers and an unchanged Gemma fingerprint. This authorizes
 only a repeat of the unchanged external shadow using the new content-addressed bundle.
+
+That shadow remained negative. The action certificate corrected the absent low-score
+case, but the learned pointer residual still overrode policy support: two supported
+cases selected no pointer and were forced to abstain, while one distractor was selected
+in another answer. The result is preserved in
+[`experiments/results/gemma4_e4b_rezero_shadow_external_v2.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v2.json).
+The next protocol will certify support per evidence item and bound the semantic pointer
+residual so it cannot reverse that host validation.

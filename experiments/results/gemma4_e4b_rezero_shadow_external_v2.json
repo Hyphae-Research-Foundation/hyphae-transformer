@@ -1,0 +1,41 @@
+{
+  "analysis": {
+    "action_match_rate": 0.8333333333333334,
+    "conservative_downgrades": 0,
+    "mean_latency_ms": 59.782233,
+    "operational_divergences": 2,
+    "p95_latency_ms": 78.354063,
+    "pointer_exact_match": 0.75,
+    "unsafe_upgrade_count": 0,
+    "verdict": "negative"
+  },
+  "artifacts": {
+    "archive_sha256": "d27ba716cf2007cb07e135d0e1a984bf3364dcfdd6efc67f88ee0dfff4592395",
+    "bootstrap_stderr_sha256": "5eaaa1b01b7712bff6ed9129afd8dc1f1ffa13e2ff169ec630b4dec0f397b890",
+    "bootstrap_stdout_sha256": "8fda3a601c59e5a58dc908158b3886e8d39a9ee05b2059506b0c5ed39eea7819",
+    "campaign_stderr_sha256": "497819891af6510f23db2fed9a080c424e43bb8dff67fccf9a6dabb4ab302328",
+    "campaign_stdout_sha256": "ac907ec9c206ebcc56cdf7ab5a5cc9b2bb4798e1a1ef5cd1e0832b48f58941c9",
+    "cloud_execution_sha256": "3173f6400d231aabc1229492412472422cffbaa912b944f5aed252301f0a7ce2",
+    "report_sha256": "ac907ec9c206ebcc56cdf7ab5a5cc9b2bb4798e1a1ef5cd1e0832b48f58941c9"
+  },
+  "bundle_id": "rzcb_9d506a053936aeb4b5f2de3380304fe96c6cc090eba295000341b9cfd8873015",
+  "bundle_sha256": "5ea905ede3ec42bb756714885aca42567655dbb4c4ebdd38029d11345872ca3c",
+  "campaign": {
+    "completed": true,
+    "created_at": "2026-08-25T13:46:54.132818+00:00",
+    "deleted_at": "2026-08-25T13:53:47.285794+00:00",
+    "droplet_id": 595043907,
+    "estimated_cost_usd": 0.51644122,
+    "lifetime_seconds": 413.152976,
+    "resources_remaining": 0,
+    "source_revision": "6bfe2a30ba39bf26e4aeb412260b38b9f725260d",
+    "status": "completed_failed_gates"
+  },
+  "failures": [
+    {"scenario_id": "external_supported_single", "expected_action": "answer", "predicted_action": "abstain", "pointer_match": false},
+    {"scenario_id": "external_supported_distractor", "expected_action": "answer", "predicted_action": "abstain", "pointer_match": false},
+    {"scenario_id": "external_three_hit_distractors", "expected_action": "answer", "predicted_action": "answer", "pointer_match": false}
+  ],
+  "root_cause_hypothesis": "The action certificate fixed absent and low-score decisions, but the unbounded learned pointer residual could still override score-based policy support. Answer actions with no selected pointer were forced to abstain by the host decoder.",
+  "schema": "hyphae-transformer.rezero-sequence-control-shadow-result/v2"
+}
