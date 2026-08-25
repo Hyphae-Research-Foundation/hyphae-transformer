@@ -1,0 +1,36 @@
+{
+  "analysis": {
+    "action_match_rate": 1.0,
+    "conservative_downgrades": 0,
+    "mean_latency_ms": 60.42819016666667,
+    "operational_divergences": 0,
+    "p95_latency_ms": 80.286024,
+    "pointer_exact_match": 1.0,
+    "unsafe_upgrade_count": 0,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "archive_sha256": "8ccb173101b2dcebaee8fb41fd666a85d82b7dc797767a41a72d598849aa2002",
+    "bootstrap_stderr_sha256": "7ce232b04744a30d3756cea9d95341251661ad46be2be01a36b00679dc90c4a5",
+    "bootstrap_stdout_sha256": "199f049ddb628ea2b27ac9637c9a2f7d2f2489cf79df1d465b4b48b887f08c33",
+    "campaign_stderr_sha256": "316609d0ef383b90ea1bb113d8eef19be47c33cb1c38bca0d09cf236d19dd030",
+    "campaign_stdout_sha256": "7824fbb196ee9b08c0741fac50e2edc6e8acbd2298e6922d6cf9c06ddd6b25df",
+    "cloud_execution_sha256": "942ccd2e9ffbd2e7fd554bbb0c8950c20e2a113f188057b68b4af461a429f4eb",
+    "report_sha256": "7824fbb196ee9b08c0741fac50e2edc6e8acbd2298e6922d6cf9c06ddd6b25df"
+  },
+  "bundle_id": "rzcb_18347c6eca826c4eea75aa78a8ddbbe69e7c2adfebe9921985ead9bc364a92ee",
+  "bundle_sha256": "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121",
+  "campaign": {
+    "completed": true,
+    "created_at": "2026-08-25T14:43:04.452751+00:00",
+    "deleted_at": "2026-08-25T14:50:25.698927+00:00",
+    "droplet_id": 595056714,
+    "estimated_cost_usd": 0.55155772,
+    "lifetime_seconds": 441.246176,
+    "resources_remaining": 0,
+    "status": "completed"
+  },
+  "cases": 12,
+  "cases_sha256": "0f3796e7b2e3d43287a4ee80e51cc14ab0efafb4507a8f69708474efe3d2d031",
+  "schema": "hyphae-transformer.rezero-sequence-control-shadow-result/v4"
+}
