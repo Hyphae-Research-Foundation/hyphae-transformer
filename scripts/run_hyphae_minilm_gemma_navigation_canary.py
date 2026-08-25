@@ -57,6 +57,7 @@ from celiums_rezero.knowledge.embedding import (
 )
 from celiums_rezero.knowledge.live import _u128_idempotency
 from celiums_rezero.knowledge.schemas import (
+    AcquisitionJob,
     EmbeddedChunk,
     GenerationManifest,
     SourceArtifact,
@@ -441,6 +442,28 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             failure_reasons.append("step0 action is not search")
         if step0_decision.selected_handles:
             failure_reasons.append("step0 selected handles despite search contract")
+        ephemeral_job = AcquisitionJob(
+            tenant=TENANT,
+            query=normalize_query(QUERY),
+            query_digest=hashlib.sha256(normalize_query(QUERY).encode()).hexdigest(),
+            corpus_generation=GENERATION,
+            policy_version="navigation-policy-v1",
+            embedding_profile=embedder.profile,
+            source_id=artifact.source_id,
+        )
+        key_id = ingest_idempotency_key(
+            ephemeral_job, embedded, embedder.profile, target=ingestor.target
+        )
+        manifest = GenerationManifest(
+            tenant=TENANT,
+            generation_id=GENERATION,
+            target=ingestor.target,
+            parent_generation_id=DISTRACTOR_GENERATION,
+            chunk_ids=tuple(item.chunk.chunk_id for item in embedded),
+            ingest_idempotency_keys=(key_id,),
+            ingest_receipt_digests=(),
+        )
+        authority.register(manifest)
         body_pending = coordinator.answer_or_enqueue(
             tenant=TENANT,
             query=QUERY,
@@ -457,19 +480,10 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
         body_job = coordinator.job_status(TENANT, body_pending.job_id)
         if body_job is None:
             raise RuntimeError("navigation body job is absent")
-        key_id = ingest_idempotency_key(
+        if ingest_idempotency_key(
             body_job, embedded, embedder.profile, target=ingestor.target
-        )
-        manifest = GenerationManifest(
-            tenant=TENANT,
-            generation_id=GENERATION,
-            target=ingestor.target,
-            parent_generation_id=DISTRACTOR_GENERATION,
-            chunk_ids=tuple(item.chunk.chunk_id for item in embedded),
-            ingest_idempotency_keys=(key_id,),
-            ingest_receipt_digests=(),
-        )
-        authority.register(manifest)
+        ) != key_id:
+            raise RuntimeError("navigation body job identity diverged")
         body_outcome = worker.run_next(job_id=body_pending.job_id)
         if (
             body_outcome is None
