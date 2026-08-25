@@ -151,6 +151,7 @@ class CloudCampaignPlan:
             UNIFIED_CAMPAIGN,
             REZERO_UNIFIED_CAMPAIGN,
             NAVIGATION_UNIFIED_CAMPAIGN,
+            NAVIGATION_V2_CAMPAIGN,
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
@@ -178,6 +179,7 @@ class CloudCampaignPlan:
                 UNIFIED_CAMPAIGN,
                 REZERO_UNIFIED_CAMPAIGN,
                 NAVIGATION_UNIFIED_CAMPAIGN,
+                NAVIGATION_V2_CAMPAIGN,
             }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
@@ -597,6 +599,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         UNIFIED_CAMPAIGN,
         REZERO_UNIFIED_CAMPAIGN,
         NAVIGATION_UNIFIED_CAMPAIGN,
+        NAVIGATION_V2_CAMPAIGN,
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
