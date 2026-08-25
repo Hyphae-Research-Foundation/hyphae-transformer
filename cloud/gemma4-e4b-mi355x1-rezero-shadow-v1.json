@@ -14,7 +14,7 @@
   "name": "hyphae-e4b-rezero-shadow-v1",
   "region": "mem1",
   "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
-  "revision": "replace-with-merged-40-character-commit-sha",
+  "revision": "b908c23a6abb9adbb165e4dc6e62648d8a597ca6",
   "size": "gpu-mi355x1-288gb-spot",
   "ssh_key_id": "55649085",
   "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
