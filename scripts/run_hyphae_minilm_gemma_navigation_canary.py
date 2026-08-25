@@ -434,6 +434,7 @@ def run(arguments: argparse.Namespace) -> tuple[dict[str, object], subprocess.Po
             policy=policy,
             search_steps_used=0,
             device=device,
+            present_evidence=False,
         )
         if step0_decision.action != "search":
             raise RuntimeError("navigation pilot did not request the required search")
