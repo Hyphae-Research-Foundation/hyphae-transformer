@@ -14,7 +14,7 @@
   "name": "hyphae-e4b-rezero-control-v1-x1",
   "region": "mem1",
   "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
-  "revision": "7fa5e516a50a585b45db0c56fde4bc6bb75f8259",
+  "revision": "d4ca96e4cb8e756e1daf832294693cf827b11427",
   "size": "gpu-mi355x1-288gb-spot",
   "ssh_key_id": "55649085",
   "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
