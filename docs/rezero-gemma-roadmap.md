@@ -165,3 +165,9 @@ in
 [`experiments/results/gemma4_e4b_rezero_shadow_external_v4.json`](../experiments/results/gemma4_e4b_rezero_shadow_external_v4.json).
 This validates promotion to a production-shaped quoted-runtime canary; it does not yet
 authorize autonomous multi-step navigation.
+
+The unified Hyphae + MiniLM + Gemma canary then ran the bounded ReZero v4 controller
+end to end: authenticated publication, restart replay, exact retrieval, one quoted
+answer, durable finalization, mailbox replay, and verified cleanup all passed with
+the exact pinned identities. The result is
+[`experiments/results/hyphae_minilm_gemma_rezero_canary_v1.json`](../experiments/results/hyphae_minilm_gemma_rezero_canary_v1.json).

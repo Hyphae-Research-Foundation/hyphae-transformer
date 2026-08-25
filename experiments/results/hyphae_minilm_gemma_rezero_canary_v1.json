@@ -1,0 +1,29 @@
+{
+  "analysis": {
+    "bundle_sha256": "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127bc1444cd121",
+    "controller_kind": "rezero-v4",
+    "decision": "answer",
+    "mailbox_accepted": 1,
+    "retrieval_approximate": false,
+    "retrieval_strategy": "exact_filtered",
+    "restart_replay": true,
+    "verdict": "positive"
+  },
+  "artifacts": {
+    "archive_sha256": "07643b51109bff8795ec183edd3645243e12f15f56f041d6bd44d786ae811336",
+    "cloud_execution_sha256": "4add19d55b500518a5e1d7eeb6a6371d36be0a9a62f2a302717731e32455c238",
+    "protocol_request_sha256": "c376664bd53de03b74814193b90c44d16207c5ebacdd3091be2ae28ed52dda05",
+    "protocol_response_sha256": "3371d578987c7e96bcd5922eea2d8734122f248daf4d6323ee9f612748935d0a",
+    "report_sha256": "7410211538ed0f15a2fb6f364951ca4b905a032883550b08a0fefd0955f6c13a"
+  },
+  "campaign": {
+    "completed": true,
+    "droplet_id": 595086684,
+    "estimated_cost_usd": 0.56358754125,
+    "lifetime_seconds": 450.870033,
+    "resources_remaining": 0,
+    "status": "completed"
+  },
+  "schema": "hyphae-transformer.hyphae-minilm-gemma-rezero-canary-result/v1",
+  "source_revision": "9e5fa70cde122d32bbadaa27b20457ab34445e4d"
+}
