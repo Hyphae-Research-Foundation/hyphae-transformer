@@ -1,0 +1,34 @@
+{
+  "analysis": {
+    "failing_gate": "abstention_recall",
+    "observed_abstention_counts": [
+      47,
+      190
+    ],
+    "observed_abstention_recall": 0.24736842105263157,
+    "other_gates": {
+      "action_accuracy": 1.0,
+      "answer_recall": 1.0,
+      "evidence_exact_match": 1.0,
+      "search_decision_recall": 1.0,
+      "unsafe_answer_rate": 0.0
+    },
+    "required_abstention_recall": 1.0,
+    "selected_learning_rate": 0.003,
+    "verdict": "negative: with exact CPU metrics the depth-3 pilot confuses calibrated abstain rows (47/190) while search initiation, evidence selection, and safety remain perfect; bounded terminal bias is insufficient; depth-3 remains an open line, v2 stays the consolidated live result"
+  },
+  "artifacts": {
+    "archive_sha256": "ffe5d5a893d05a90dd34d33eb34c700e59226413088f14ecf0f9f47be444d36d",
+    "cloud_execution_sha256": "d2bb2657fb772af22d6cff1b31f2b2a9ed0b390a4461522e9324a557327a7df6",
+    "report_sha256": "430f810e76b9a7c0ad05ed1ae98b69695cec810dd86b0763fa4178c1bafc0c58"
+  },
+  "campaign": {
+    "completed": true,
+    "droplet_id": 595215174,
+    "estimated_cost_usd": 0.6287962825,
+    "lifetime_seconds": 503.037026,
+    "status": "completed"
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-navigation-v4-result/v1",
+  "source_revision": "b71ea30c808d89e6de0f6a9226dfbe54e24d73ee"
+}

@@ -197,3 +197,12 @@ with selected handles equal to the retrieved set, with every native contract gre
 ([positive result](../experiments/results/hyphae_minilm_gemma_navigation_canary_v2.json)).
 No gate was relaxed between v1 and v2; the v2 protocol changed only the training
 certificate distribution, preregistered before execution.
+
+Depth-3 continuation (v3/v3.1/v4) exposed a calibrated abstention gap: with exact CPU
+metrics the depth-3 pilots keep search initiation, exact evidence selection, and zero
+unsafe answers at 1.0, but abstention recall on calibrated hold-out rows collapses
+(47/190 for v4), because saturated PARTIAL certificates make abstain rows
+representationally close to search rows and the bounded head lacks a certified abstain
+margin. Earlier 0.99999994 values were a ROCm mean artefact; integer counts revealed the
+true metric. No gate was relaxed; depth-3 remains an open research line. The consolidated
+live navigation result stays the depth-2 calibrated canary v2.
