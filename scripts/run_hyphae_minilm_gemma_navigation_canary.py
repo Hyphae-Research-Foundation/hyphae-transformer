@@ -133,7 +133,7 @@ class BoundedRecordingClient:
         return response
 
 
-def main() -> int:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hyphae-archive", type=Path, required=True)
     parser.add_argument("--hyphae-binary", type=Path, required=True)
@@ -145,7 +145,11 @@ def main() -> int:
     parser.add_argument("--source-patch-sha256", required=True)
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    arguments = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> int:
+    arguments = _parse_args()
     arguments.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     if any(arguments.out.iterdir()):
         allowed = {
