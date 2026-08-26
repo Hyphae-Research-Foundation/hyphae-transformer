@@ -33,6 +33,7 @@ class ReZeroNeuroPilot(nn.Module):
         pointer_policy_score: float = 0.72,
         pointer_policy_scale: float = 20.0,
         maximum_evidence_items: int = 8,
+        action_terminal_bound: float = 0.0,
     ) -> None:
         super().__init__()
         if hidden_size < 1 or control_size < 2 or control_size % 2:
@@ -41,6 +42,8 @@ class ReZeroNeuroPilot(nn.Module):
             raise ValueError("maximum evidence items must be positive")
         if action_residual_bound <= 0:
             raise ValueError("action residual bound must be positive")
+        if action_terminal_bound < 0:
+            raise ValueError("action terminal bound must be non-negative")
         if host_control_contract not in HOST_CONTROL_SIZES:
             raise ValueError("host control contract is invalid")
         self.hidden_size = hidden_size
@@ -67,6 +70,8 @@ class ReZeroNeuroPilot(nn.Module):
         self.final_norm = RMSNorm(control_size, config.rms_norm_epsilon)
         self.action = nn.Linear(control_size + self.host_control_size, NAVIGATION_ACTION_COUNT)
         self.pointer = nn.Linear(control_size, 1, bias=False)
+        self.action_terminal_bound = action_terminal_bound
+        self.action_terminal = nn.Parameter(torch.zeros(NAVIGATION_ACTION_COUNT))
 
     def forward(
         self,
@@ -124,6 +129,10 @@ class ReZeroNeuroPilot(nn.Module):
         prior[:, ANSWER_INDEX] = certificate[:, 0]
         prior[:, ABSTAIN_INDEX] = certificate[:, 3] + certificate[:, 4]
         action_logits = action_logits + self.action_policy_prior_scale * prior
+        if self.action_terminal_bound > 0:
+            action_logits = action_logits + self.action_terminal_bound * torch.tanh(
+                self.action_terminal
+            )
         pointers = self.pointer(hidden[:, 1:]).squeeze(-1)
         pointers = self.action_residual_bound * torch.tanh(pointers)
         support = torch.where(

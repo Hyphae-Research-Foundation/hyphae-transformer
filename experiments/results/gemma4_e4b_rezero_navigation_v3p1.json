@@ -1,0 +1,30 @@
+{
+  "analysis": {
+    "failing_gate": "abstention_recall",
+    "observed_abstention_recall": 0.9999999403953552,
+    "other_gates": {
+      "action_accuracy": 1.0,
+      "answer_recall": 1.0,
+      "evidence_exact_match": 1.0,
+      "search_decision_recall": 1.0,
+      "unsafe_answer_rate": 0.0
+    },
+    "required_abstention_recall": 1.0,
+    "selected_learning_rate": 0.001,
+    "verdict": "negative: same structural abstain/answer tie as v3 across the expanded search; motivates the bounded terminal bias of v4"
+  },
+  "artifacts": {
+    "archive_sha256": "63ef6af19a481beb20e86b83b549a6fe6ee5e956ac92935c7f497c23fbebb9aa",
+    "cloud_execution_sha256": "da36192ad73ba5b93afb98985208ea48f35194f663bc58b61ab6a90c82f5f0c2",
+    "report_sha256": "b74b8a16c7dc6b5a4f696042fccfe16aa66c5c30a3fef8bbb72cf1a0ca0b6752"
+  },
+  "campaign": {
+    "completed": true,
+    "droplet_id": 595205229,
+    "estimated_cost_usd": 0.655335745,
+    "lifetime_seconds": 524.268596,
+    "status": "completed"
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-navigation-v3p1-result/v1",
+  "source_revision": "db1515b9fad1107fbd9b2f4cb6e4688432250315"
+}

@@ -1,0 +1,107 @@
+{
+  "actions": {
+    "order": [
+      "search",
+      "answer",
+      "abstain"
+    ],
+    "search_maximum_steps": 2
+  },
+  "backbone": {
+    "feature_contract": "gemma4-e4b-it-layer41-final-valid-token-f32-v1",
+    "model_id": "google/gemma-4-E4B-it",
+    "model_revision": "ee0ef6023621cff504d758262d4e04895a5af4a2",
+    "model_safetensors_sha256": "cfbd3d2f1cd71bd471c37fe2bf8546d5028d41e5736f64e1ca6c6b8893125503",
+    "transformers": "5.14.1"
+  },
+  "calibration": {
+    "saturated_search_scores": 1.0,
+    "scheme": "hyphae-2.1.0-exact-filtered-v1",
+    "score_scale": 0.03278688524590164,
+    "search_step_evidence": "present_continuation"
+  },
+  "candidate": {
+    "action_head": "bounded_residual_plus_host_policy_certificate",
+    "action_policy_prior_scale": 20.0,
+    "action_residual_bound": 1.0,
+    "action_terminal_bound": 0.5,
+    "control_size": 256,
+    "gate_init": 0.0,
+    "host_control_contract": "host-policy-certificate-v2",
+    "layers": 2,
+    "n_heads": 8,
+    "pointer_residual_bound": 1.0,
+    "residual_strategy": "rezero_rms_shared",
+    "sequence": "query_then_search_certificates_calibrated_depth3_terminalbias"
+  },
+  "claim": "Depth-3 calibrated navigation with a bounded terminal action bias (magnitude <= 0.5) that breaks float32 abstain/answer ties while host certificates of magnitude 20 remain authoritative; gates unchanged.",
+  "dataset": {
+    "governed_dataset_id": "gtd_b7161eb4c1cf007dca96741ad8acffbe25cd9b6b46681fd48f19f21fde29332f",
+    "manifest_sha256": "2e3f45d3a210ab17dbe078fadd9e0a6feda8fda88324f5f958f9488e7627115e",
+    "provenance": "mars-v2-multi-step-derived-v4-calibrated-depth3-terminalbias"
+  },
+  "falsification": [
+    "Any Gemma state changes.",
+    "Any unsafe answer occurs on held-out or adversarial trajectories.",
+    "Any trajectory exceeds its search bound.",
+    "Any target disagrees with the sufficiency policy.",
+    "Any selected search query is noncanonical or null.",
+    "Selected loss exceeds its initial loss.",
+    "Any calibration value differs from the pinned Hyphae 2.1.0 scale."
+  ],
+  "gates": {
+    "abstention_recall": 1.0,
+    "action_accuracy": 0.9,
+    "answer_recall": 0.8,
+    "evidence_exact_match": 0.9,
+    "search_decision_recall": 0.9,
+    "unsafe_answer_rate": 0.0
+  },
+  "prior_result": {
+    "outcome": "negative",
+    "report_sha256": "b74b8a16c7dc6b5a4f696042fccfe16aa66c5c30a3fef8bbb72cf1a0ca0b6752",
+    "root_cause": "v3/v3.1 abstain/answer ties saturate the +-1 residual bound; a bounded terminal bias is required to break them."
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v4",
+  "scope": "Fixture-derived multi-step trajectories plus calibrated search-initiation rows over the governed MARS dataset only; certificate values are host-computed from the fixed sufficiency policy; no model authority over retrieval, publication, or tenants.",
+  "structural_gates": {
+    "backbone_unchanged": true,
+    "maximum_trainable_parameters": 5000000,
+    "search_bound_enforced": true,
+    "selected_loss_not_greater_than_initial": true
+  },
+  "training_search": {
+    "candidate_learning_rates": [
+      0.0003,
+      0.001,
+      0.003
+    ],
+    "checkpoint_selection": "minimum_training_loss",
+    "epochs": 400,
+    "evidence_loss_weight": 2.0,
+    "gradient_clip": 1.0,
+    "minimum_confidence": 0.5,
+    "optimizer": "adamw",
+    "pointer_policy_scale": 20.0,
+    "pointer_policy_score": 0.72,
+    "seeds": [
+      17,
+      29,
+      43
+    ],
+    "selection": {
+      "evaluation": "Evaluate validation once per seed; evaluate test and adversarial once after selection.",
+      "ranking": [
+        "maximum_validation_passed_seeds",
+        "minimum_mean_validation_unsafe_answer_rate",
+        "maximum_mean_validation_abstention_recall",
+        "maximum_mean_validation_search_decision_recall",
+        "maximum_mean_validation_action_accuracy",
+        "minimum_mean_training_selected_loss",
+        "minimum_learning_rate"
+      ],
+      "scope": "Train and validation only"
+    },
+    "weight_decay": 0.01
+  }
+}
