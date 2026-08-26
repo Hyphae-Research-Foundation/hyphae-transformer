@@ -177,12 +177,16 @@ def main() -> int:
         }
         raise
     finally:
+        import sys as _sys2
+
+        print("[navigation-canary] entering main finally", file=_sys2.stderr, flush=True)
         active = daemon if daemon is not None else _ACTIVE_DAEMON
         if active is not None:
             _stop_daemon(active, arguments.work_root / "hyphae.sock")
         shutil.rmtree(arguments.work_root, ignore_errors=True)
         report["work_root_removed"] = not arguments.work_root.exists()
         _write_json(arguments.out / "navigation-campaign-report.json", report)
+        print("[navigation-canary] report written", file=_sys2.stderr, flush=True)
     return 0
 
 
