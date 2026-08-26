@@ -358,6 +358,8 @@ def execute_digitalocean_campaign(
         _write_process_evidence(plan, "campaign", campaign)
         _validate_remote_source_patch(plan, public_ip, command_runner)
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
+        if plan.campaign_command[0] == NAVIGATION_V2_CAMPAIGN:
+            _write_retrieved_evidence(plan, campaign)
         retrieval = command_runner.run(
             _artifact_command(plan, public_ip),
             timeout=min(
@@ -365,7 +367,7 @@ def execute_digitalocean_campaign(
                 _remaining_lifetime(plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS),
             ),
         )
-        if plan.accelerator == "amd-rocm":
+        if plan.accelerator == "amd-rocm" and plan.campaign_command[0] != NAVIGATION_V2_CAMPAIGN:
             _write_retrieved_evidence(plan, retrieval)
         status = "completed"
     except Exception as error:
@@ -823,7 +825,8 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 ]
                 inner = (
                     f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}; "
-                    "echo '[navigation-canary] /runs after exit:' >&2; ls -la /runs >&2"
+                    "echo '[navigation-canary] /runs after exit:' >&2; ls -la /runs >&2; "
+                    "tar -C /runs -czf - . | base64 -w0"
                 )
                 return " && ".join(
                     (
