@@ -275,6 +275,7 @@ def train_navigation_pilot(
             "backbone": before,
             "action_order": list(NAVIGATION_ACTIONS),
             "maximum_evidence_items": maximum_evidence_items,
+            "action_terminal_bound": pilot.action_terminal_bound,
         },
         temporary,
     )
@@ -488,6 +489,7 @@ def run_navigation_experiment_v2(
         "v2": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
         "v3": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3",
         "v3.1": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3.1",
+        "v4": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v4",
     }
     if preregistration.get("schema") != expected_prereg.get(schema_version):
         raise ValueError("navigation calibrated preregistration schema is invalid")
@@ -567,8 +569,10 @@ def run_navigation_experiment_v2(
         "schema": (
             SCHEMA_V2
             if schema_version == "v2"
-            else SCHEMA_V3.replace("/v3", "/v3.1")
+            else "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v3.1"
             if schema_version == "v3.1"
+            else "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v4"
+            if schema_version == "v4"
             else SCHEMA_V3
         ),
         "completed": True,
@@ -596,6 +600,8 @@ def run_navigation_experiment_v2(
     report_name = (
         "rezero-navigation-v3p1-report.json"
         if schema_version == "v3.1"
+        else "rezero-navigation-v4-report.json"
+        if schema_version == "v4"
         else f"rezero-navigation-{schema_version}-report.json"
     )
     (output / report_name).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -646,8 +652,10 @@ def load_navigation_pilot(
         pointer_policy_score=pointer_policy_score,
         pointer_policy_scale=pointer_policy_scale,
         maximum_evidence_items=maximum_evidence_items,
+        action_terminal_bound=float(payload.get("action_terminal_bound", 0.0)),
     ).to(device)
-    pilot.load_state_dict(payload["head"], strict=True)
+    head = {key: value for key, value in payload["head"].items()}
+    pilot.load_state_dict(head, strict=True)
     pilot.eval()
     return pilot
 
@@ -779,6 +787,7 @@ def _pilot_from_prereg(
         pointer_policy_score=float(search["pointer_policy_score"]),
         pointer_policy_scale=float(search["pointer_policy_scale"]),
         maximum_evidence_items=maximum_evidence_items,
+        action_terminal_bound=float(candidate.get("action_terminal_bound", 0.0)),
     )
 
 
@@ -818,6 +827,7 @@ def _validate_preregistration(preregistration: dict[str, Any], dataset: Governed
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3",
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3.1",
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v4",
     }:
         raise ValueError("navigation preregistration schema is invalid")
     if preregistration["dataset"]["governed_dataset_id"] != dataset.manifest.dataset_id:
