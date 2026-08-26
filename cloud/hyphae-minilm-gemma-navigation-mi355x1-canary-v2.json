@@ -15,7 +15,7 @@
   "name": "hyphae-minilm-gemma-navigation-canary-v2",
   "region": "mem1",
   "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
-  "revision": "0ecc2995fd061768466ece4cbafb2f2ffdd6ee6c",
+  "revision": "7838550b2f675ef3965bc3d5a6887735af5c3468",
   "size": "gpu-mi355x1-288gb-spot",
   "ssh_key_id": "55649085",
   "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
