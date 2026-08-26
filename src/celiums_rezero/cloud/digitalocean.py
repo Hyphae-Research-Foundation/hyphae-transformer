@@ -148,6 +148,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-rezero-navigation-v1",
             "train-gemma4-e4b-rezero-navigation-v2",
             "train-gemma4-e4b-rezero-navigation-v3",
+            "train-gemma4-e4b-rezero-navigation-v3p1",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "shadow-gemma4-e4b-rezero-v1",
@@ -178,6 +179,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-rezero-navigation-v1",
                 "train-gemma4-e4b-rezero-navigation-v2",
                 "train-gemma4-e4b-rezero-navigation-v3",
+                "train-gemma4-e4b-rezero-navigation-v3p1",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "shadow-gemma4-e4b-rezero-v1",
@@ -605,6 +607,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-rezero-navigation-v1",
         "train-gemma4-e4b-rezero-navigation-v2",
         "train-gemma4-e4b-rezero-navigation-v3",
+        "train-gemma4-e4b-rezero-navigation-v3p1",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "shadow-gemma4-e4b-rezero-v1",
@@ -677,6 +680,20 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/workspace/experiments/governed/mars-v2-e4b-v1",
                 "--preregistration",
                 ("/workspace/experiments/canonical/gemma4_e4b_rezero_navigation_v1.json"),
+                "--out",
+                "/runs",
+                *plan.campaign_command[1:],
+            ]
+        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3p1":
+            command = [
+                "python",
+                "/workspace/scripts/train_gemma4_e4b_navigation_v3p1.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--dataset",
+                "/workspace/experiments/governed/mars-v2-e4b-v1",
+                "--preregistration",
+                ("/workspace/experiments/canonical/gemma4_e4b_rezero_navigation_v3p1.json"),
                 "--out",
                 "/runs",
                 *plan.campaign_command[1:],
@@ -1302,6 +1319,8 @@ def _write_retrieved_evidence(
                 report_name = (
                     "./rezero-navigation-report.json"
                     if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+                    else "./rezero-navigation-v3p1-report.json"
+                    if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3p1"
                     else "./rezero-navigation-v3-report.json"
                     if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3"
                     else "./rezero-navigation-v2-report.json"
@@ -1372,6 +1391,8 @@ def _write_retrieved_evidence(
         report_name = (
             "rezero-navigation-report.json"
             if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+            else "rezero-navigation-v3p1-report.json"
+            if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3p1"
             else "rezero-navigation-v3-report.json"
             if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3"
             else "rezero-navigation-v2-report.json"
