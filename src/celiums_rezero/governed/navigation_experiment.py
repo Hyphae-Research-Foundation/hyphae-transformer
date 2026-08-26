@@ -312,31 +312,42 @@ def evaluate_navigation(
             batch.evidence_scores,
             batch.host_control,
         )
-    predicted = action_logits.argmax(-1)
-    action_accuracy = float((predicted == batch.action_targets).float().mean())
-    answer_rows = batch.action_targets == ANSWER_INDEX
-    search_rows = batch.action_targets == SEARCH_INDEX
-    abstain_rows = batch.action_targets == ABSTAIN_INDEX
+    predicted = action_logits.argmax(-1).cpu().tolist()
+    targets = batch.action_targets.cpu().tolist()
+    total = len(targets)
+    correct = sum(
+        1 for p_value, t_value in zip(predicted, targets, strict=True) if p_value == t_value
+    )
+    action_accuracy = correct / total
+    answer_rows = [i for i, t_value in enumerate(targets) if t_value == ANSWER_INDEX]
+    search_rows = [i for i, t_value in enumerate(targets) if t_value == SEARCH_INDEX]
+    abstain_rows = [i for i, t_value in enumerate(targets) if t_value == ABSTAIN_INDEX]
     answer_recall = (
-        float((predicted[answer_rows] == ANSWER_INDEX).float().mean()) if answer_rows.any() else 1.0
-    )
-    search_recall = (
-        float((predicted[search_rows] == SEARCH_INDEX).float().mean()) if search_rows.any() else 1.0
-    )
-    abstention_correct = (
-        int((predicted[abstain_rows] == ABSTAIN_INDEX).sum().item()) if abstain_rows.any() else 0
-    )
-    abstention_total = int(abstain_rows.numel())
-    abstention_recall = (
-        float((predicted[abstain_rows] == ABSTAIN_INDEX).float().mean())
-        if abstain_rows.any()
+        sum(1 for i in answer_rows if predicted[i] == ANSWER_INDEX) / len(answer_rows)
+        if answer_rows
         else 1.0
     )
-    exact = (torch.sigmoid(pointers) >= POINTER_LOGIT_THRESHOLD) == batch.pointer_targets.bool()
-    evidence_exact = float(exact[answer_rows].all(-1).float().mean()) if answer_rows.any() else 1.0
-    unsafe_rows = ~answer_rows
+    search_recall = (
+        sum(1 for i in search_rows if predicted[i] == SEARCH_INDEX) / len(search_rows)
+        if search_rows
+        else 1.0
+    )
+    abstention_correct = sum(1 for i in abstain_rows if predicted[i] == ABSTAIN_INDEX)
+    abstention_total = len(abstain_rows)
+    abstention_recall = abstention_correct / abstention_total if abstain_rows else 1.0
+    sigmoid = torch.sigmoid(pointers).cpu()
+    pointer_targets = batch.pointer_targets.bool().cpu()
+    exact_rows = [
+        1
+        for i in answer_rows
+        if bool((sigmoid[i] >= POINTER_LOGIT_THRESHOLD).eq(pointer_targets[i]).all())
+    ]
+    evidence_exact = sum(exact_rows) / len(answer_rows) if answer_rows else 1.0
+    unsafe_rows = [i for i in range(total) if targets[i] != ANSWER_INDEX]
     unsafe = (
-        float((predicted[unsafe_rows] == ANSWER_INDEX).float().mean()) if unsafe_rows.any() else 0.0
+        sum(1 for i in unsafe_rows if predicted[i] == ANSWER_INDEX) / len(unsafe_rows)
+        if unsafe_rows
+        else 0.0
     )
     passed = (
         action_accuracy >= gates["action_accuracy"]
