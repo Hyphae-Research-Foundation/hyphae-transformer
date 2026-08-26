@@ -171,3 +171,29 @@ end to end: authenticated publication, restart replay, exact retrieval, one quot
 answer, durable finalization, mailbox replay, and verified cleanup all passed with
 the exact pinned identities. The result is
 [`experiments/results/hyphae_minilm_gemma_rezero_canary_v1.json`](../experiments/results/hyphae_minilm_gemma_rezero_canary_v1.json).
+
+## Live multi-step navigation (fixture v1 negative, calibrated v2 positive)
+
+The fixture navigation campaign (`gemma4_e4b_rezero_navigation_v1`) trained the bounded
+ReZero neuropilot over host-computed certificates and passed all seeds with exact
+evidence handles and zero unsafe answers
+([result](../experiments/results/gemma4_e4b_rezero_navigation_v1.json)). The live canary
+v1 then attempted the same pilot against a real Hyphae 2.1.0 corpus and failed its
+preregistered step-0 gate: the pilot abstained instead of requesting search. The report
+([negative result](../experiments/results/hyphae_minilm_gemma_navigation_canary_v1.json))
+shows the root cause was distributional, not unsafe: live `exact_filtered` calibration
+(`score_scale 0.03278688524590164`) saturates every top hit to 1.0, producing PARTIAL
+one-hot certificates the fixture pilot had never seen; the bounded head failed safe to
+abstain, and step 1 still answered with exactly the retrieved handle.
+
+Navigation v2 closes that gap at the derivation level: `derive_navigation_dataset_v2`
+adds search-initiation rows whose evidence scores and host certificates use exactly the
+live calibration (two-chunk saturated PARTIAL evidence). The v2 campaign passed all
+seeds (search recall and evidence exact match 1.0) and released
+`rezero-navigation-v2.0.0` (bundle
+`d14963e7835a81ee4ca32274d34ba5ed098270a626ba34690fb706f3465ab7ac`). The live
+canary v2 passed both steps on MI355X: search on a saturated PARTIAL corpus and answer
+with selected handles equal to the retrieved set, with every native contract green
+([positive result](../experiments/results/hyphae_minilm_gemma_navigation_canary_v2.json)).
+No gate was relaxed between v1 and v2; the v2 protocol changed only the training
+certificate distribution, preregistered before execution.

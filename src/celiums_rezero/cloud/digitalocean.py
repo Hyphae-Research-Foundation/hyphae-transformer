@@ -826,7 +826,6 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 ]
                 inner = (
                     f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}; "
-                    "echo '[navigation-canary] /runs after exit:' >&2; ls -la /runs >&2; "
                     "cd /runs && tar -czf - $(ls -A) | base64 -w0"
                 )
                 return " && ".join(
