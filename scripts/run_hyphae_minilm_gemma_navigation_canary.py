@@ -163,6 +163,16 @@ def main() -> int:
             "completed": False,
         },
     )
+    import os as _os
+    import sys as _sysd
+
+    print(
+        "[navigation-canary] out dir:",
+        _os.path.abspath(arguments.out),
+        sorted(_os.listdir(arguments.out)),
+        file=_sysd.stderr,
+        flush=True,
+    )
     daemon: subprocess.Popen[str] | None = None
     report: dict[str, object]
     try:
