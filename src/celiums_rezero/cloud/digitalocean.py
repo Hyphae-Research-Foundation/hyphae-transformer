@@ -25,12 +25,15 @@ REZERO_V4_BUNDLE_SHA256 = "5697dda245fe93c19e36a7741c7e6e484b770a426be4303843127
 NAVIGATION_BUNDLE_SHA256 = "5cb0381c03f944706819e6c5ce2d9dc71be63c27b88292cfd28fd2b489d7b7c8"
 NAVIGATION_V2_BUNDLE_SHA256 = "d14963e7835a81ee4ca32274d34ba5ed098270a626ba34690fb706f3465ab7ac"
 NAVIGATION_V2_CHECKPOINT_SHA256 = "0f1f140d683df581020a39b221802f20a14ced6d4316748f70aab36ced686844"
+NAVIGATION_V3_BUNDLE_SHA256 = "NAV3_BUNDLE_SHA256"
+NAVIGATION_V3_CHECKPOINT_SHA256 = "NAV3_CHECKPOINT_SHA256"
 HYPHAE_WHEEL_SHA256 = "fd6503abbcac18db9a6705682b80a83904389f146e6dd0c4d17fdef49535a5fb"
 HYPHAE_WHEEL_BYTES = 87_754
 UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-v1"
 REZERO_UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-rezero-v1"
 NAVIGATION_UNIFIED_CAMPAIGN = "canary-hyphae-minilm-gemma-navigation-v1"
 NAVIGATION_V2_CAMPAIGN = "canary-hyphae-minilm-gemma-navigation-v2"
+NAVIGATION_V3_CAMPAIGN = "canary-hyphae-minilm-gemma-navigation-v3"
 UNIFIED_EVIDENCE = (
     "unified-campaign-report.json",
     "minilm-preflight.json",
@@ -56,6 +59,7 @@ UNIFIED_CAMPAIGNS = (
     REZERO_UNIFIED_CAMPAIGN,
     NAVIGATION_UNIFIED_CAMPAIGN,
     NAVIGATION_V2_CAMPAIGN,
+    NAVIGATION_V3_CAMPAIGN,
 )
 
 
@@ -143,6 +147,7 @@ class CloudCampaignPlan:
             "train-gemma4-e4b-rezero-v4",
             "train-gemma4-e4b-rezero-navigation-v1",
             "train-gemma4-e4b-rezero-navigation-v2",
+            "train-gemma4-e4b-rezero-navigation-v3",
             "shadow-gemma4-e4b-v1",
             "shadow-gemma4-e4b-v2",
             "shadow-gemma4-e4b-rezero-v1",
@@ -153,6 +158,7 @@ class CloudCampaignPlan:
             REZERO_UNIFIED_CAMPAIGN,
             NAVIGATION_UNIFIED_CAMPAIGN,
             NAVIGATION_V2_CAMPAIGN,
+            NAVIGATION_V3_CAMPAIGN,
         }:
             raise ValueError("campaign command is not allowlisted")
         if self.accelerator not in {"nvidia", "amd-rocm"}:
@@ -171,6 +177,7 @@ class CloudCampaignPlan:
                 "train-gemma4-e4b-rezero-v4",
                 "train-gemma4-e4b-rezero-navigation-v1",
                 "train-gemma4-e4b-rezero-navigation-v2",
+                "train-gemma4-e4b-rezero-navigation-v3",
                 "shadow-gemma4-e4b-v1",
                 "shadow-gemma4-e4b-v2",
                 "shadow-gemma4-e4b-rezero-v1",
@@ -181,6 +188,7 @@ class CloudCampaignPlan:
                 REZERO_UNIFIED_CAMPAIGN,
                 NAVIGATION_UNIFIED_CAMPAIGN,
                 NAVIGATION_V2_CAMPAIGN,
+                NAVIGATION_V3_CAMPAIGN,
             }
         )
         if gemma_workload != (self.accelerator == "amd-rocm"):
@@ -359,7 +367,7 @@ def execute_digitalocean_campaign(
         _write_process_evidence(plan, "campaign", campaign)
         _validate_remote_source_patch(plan, public_ip, command_runner)
         plan.artifact_directory.mkdir(parents=True, exist_ok=True)
-        if plan.campaign_command[0] == NAVIGATION_V2_CAMPAIGN:
+        if plan.campaign_command[0] in {NAVIGATION_V2_CAMPAIGN, NAVIGATION_V3_CAMPAIGN}:
             _write_retrieved_evidence(plan, campaign)
         retrieval = command_runner.run(
             _artifact_command(plan, public_ip),
@@ -368,7 +376,10 @@ def execute_digitalocean_campaign(
                 _remaining_lifetime(plan, created_clock, reserve_seconds=CLEANUP_RESERVE_SECONDS),
             ),
         )
-        if plan.accelerator == "amd-rocm" and plan.campaign_command[0] != NAVIGATION_V2_CAMPAIGN:
+        if plan.accelerator == "amd-rocm" and plan.campaign_command[0] not in {
+            NAVIGATION_V2_CAMPAIGN,
+            NAVIGATION_V3_CAMPAIGN,
+        }:
             _write_retrieved_evidence(plan, retrieval)
         status = "completed"
     except Exception as error:
@@ -593,6 +604,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         "train-gemma4-e4b-rezero-v4",
         "train-gemma4-e4b-rezero-navigation-v1",
         "train-gemma4-e4b-rezero-navigation-v2",
+        "train-gemma4-e4b-rezero-navigation-v3",
         "shadow-gemma4-e4b-v1",
         "shadow-gemma4-e4b-v2",
         "shadow-gemma4-e4b-rezero-v1",
@@ -603,6 +615,7 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
         REZERO_UNIFIED_CAMPAIGN,
         NAVIGATION_UNIFIED_CAMPAIGN,
         NAVIGATION_V2_CAMPAIGN,
+        NAVIGATION_V3_CAMPAIGN,
     }:
         campaign_seconds = plan.max_lifetime_seconds - CLEANUP_RESERVE_SECONDS
         if plan.campaign_command[0] == "smoke-gemma4-e4b":
@@ -664,6 +677,20 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                 "/workspace/experiments/governed/mars-v2-e4b-v1",
                 "--preregistration",
                 ("/workspace/experiments/canonical/gemma4_e4b_rezero_navigation_v1.json"),
+                "--out",
+                "/runs",
+                *plan.campaign_command[1:],
+            ]
+        elif plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3":
+            command = [
+                "python",
+                "/workspace/scripts/train_gemma4_e4b_navigation_v3.py",
+                "--model",
+                "/data/gemma4-e4b",
+                "--dataset",
+                "/workspace/experiments/governed/mars-v2-e4b-v1",
+                "--preregistration",
+                ("/workspace/experiments/canonical/gemma4_e4b_rezero_navigation_v3.json"),
                 "--out",
                 "/runs",
                 *plan.campaign_command[1:],
@@ -838,6 +865,45 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                         ),
                     )
                 )
+            if plan.campaign_command[0] == NAVIGATION_V3_CAMPAIGN:
+                command = [
+                    "python",
+                    "/workspace/scripts/run_hyphae_minilm_gemma_navigation_canary_v3.py",
+                    "--hyphae-archive",
+                    "/data/hyphae-2.1.0-x86_64-unknown-linux-gnu.tar.gz",
+                    "--hyphae-binary",
+                    "/data/hyphae-2.1.0",
+                    "--hyphae-wheel",
+                    "/data/hyphae_sdk-2.1.0-py3-none-any.whl",
+                    "--minilm-model",
+                    "/data/all-MiniLM-L6-v2",
+                    "--gemma-model",
+                    "/data/gemma4-e4b",
+                    "--pilot",
+                    "/data/gemma4-e4b-rezero-navigation-v3-seed17.tar.gz",
+                    "--source-revision",
+                    plan.revision,
+                    "--source-patch-sha256",
+                    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    "--work-root",
+                    "/tmp/hyphae-navigation-v3",
+                    "--out",
+                    "/runs",
+                ]
+                inner = (
+                    f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}; "
+                    "cd /runs && tar -czf - $(ls -A) | base64 -w0"
+                )
+                return " && ".join(
+                    (
+                        (
+                            "timeout --signal=TERM "
+                            f"{campaign_seconds}s "
+                            f"{_rocm_container_command(plan, network_none=True)} "
+                            "/bin/bash -lc " + shlex.quote(inner)
+                        ),
+                    )
+                )
             rezero_unified = plan.campaign_command[0] == REZERO_UNIFIED_CAMPAIGN
             command = [
                 "python",
@@ -982,6 +1048,8 @@ def _expected_artifact_name(plan: CloudCampaignPlan) -> str:
         if plan.campaign_command[0] == "canary-gemma4-e4b-quoted-runtime-v1"
         else "hyphae-minilm-gemma-navigation-evidence.tar.gz"
         if plan.campaign_command[0] == NAVIGATION_UNIFIED_CAMPAIGN
+        else "hyphae-minilm-gemma-navigation-v3-evidence.tar.gz"
+        if plan.campaign_command[0] == NAVIGATION_V3_CAMPAIGN
         else "hyphae-minilm-gemma-navigation-v2-evidence.tar.gz"
         if plan.campaign_command[0] == NAVIGATION_V2_CAMPAIGN
         else "hyphae-minilm-gemma-evidence.tar.gz"
@@ -1127,6 +1195,21 @@ def _rocm_bootstrap_inner(plan: CloudCampaignPlan) -> str:
                 ),
             ]
         )
+    if plan.campaign_command[0] == NAVIGATION_V3_CAMPAIGN:
+        commands.extend(
+            [
+                (
+                    "curl -LsSf -o /data/gemma4-e4b-rezero-navigation-v3-seed17.tar.gz "
+                    "https://github.com/Hyphae-Research-Foundation/hyphae-transformer/"
+                    "releases/download/rezero-navigation-v3.0.0/"
+                    "gemma4-e4b-rezero-navigation-v3-seed17.tar.gz"
+                ),
+                (
+                    f"echo '{NAVIGATION_V3_BUNDLE_SHA256}  "
+                    "/data/gemma4-e4b-rezero-navigation-v3-seed17.tar.gz' | sha256sum -c -"
+                ),
+            ]
+        )
     if plan.campaign_command[0] == "shadow-gemma4-e4b-rezero-v1":
         commands.extend(
             [
@@ -1219,6 +1302,8 @@ def _write_retrieved_evidence(
                 report_name = (
                     "./rezero-navigation-report.json"
                     if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+                    else "./rezero-navigation-v3-report.json"
+                    if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3"
                     else "./rezero-navigation-v2-report.json"
                     if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v2"
                     else "./rezero-sequence-report.json"
@@ -1287,6 +1372,8 @@ def _write_retrieved_evidence(
         report_name = (
             "rezero-navigation-report.json"
             if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v1"
+            else "rezero-navigation-v3-report.json"
+            if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v3"
             else "rezero-navigation-v2-report.json"
             if plan.campaign_command[0] == "train-gemma4-e4b-rezero-navigation-v2"
             else "rezero-sequence-report.json"
@@ -1352,6 +1439,7 @@ def _valid_unified_report(value: dict[str, object], plan: CloudCampaignPlan) -> 
     if plan.campaign_command[0] in {
         NAVIGATION_UNIFIED_CAMPAIGN,
         NAVIGATION_V2_CAMPAIGN,
+        NAVIGATION_V3_CAMPAIGN,
     }:
         return _valid_navigation_report(value, plan)
     dependencies = value.get("dependencies")
@@ -1406,14 +1494,25 @@ def _valid_unified_report(value: dict[str, object], plan: CloudCampaignPlan) -> 
 
 def _valid_navigation_report(value: dict[str, object], plan: CloudCampaignPlan) -> bool:
     v2 = plan.campaign_command[0] == NAVIGATION_V2_CAMPAIGN
+    v3 = plan.campaign_command[0] == NAVIGATION_V3_CAMPAIGN
     expected_schema = (
-        "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v2"
+        "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v3"
+        if v3
+        else "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v2"
         if v2
         else "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v1"
     )
-    expected_bundle = NAVIGATION_V2_BUNDLE_SHA256 if v2 else NAVIGATION_BUNDLE_SHA256
+    expected_bundle = (
+        NAVIGATION_V3_BUNDLE_SHA256
+        if v3
+        else NAVIGATION_V2_BUNDLE_SHA256
+        if v2
+        else NAVIGATION_BUNDLE_SHA256
+    )
     expected_checkpoint = (
-        NAVIGATION_V2_CHECKPOINT_SHA256
+        NAVIGATION_V3_CHECKPOINT_SHA256
+        if v3
+        else NAVIGATION_V2_CHECKPOINT_SHA256
         if v2
         else "47940ec5f690fab92f13601ca6c1593b8897d062a04c3b853e4fc99fd762aca2"
     )
@@ -1457,13 +1556,23 @@ def _valid_navigation_report(value: dict[str, object], plan: CloudCampaignPlan) 
         and isinstance(pilot, dict)
         and pilot.get("maximum_evidence_items") == 8
         and isinstance(steps, list)
-        and len(steps) == 2
+        and len(steps) == (3 if v3 else 2)
         and steps[0].get("action") == "search"
         and steps[0].get("selected_handles") == []
-        and steps[1].get("action") == "answer"
-        and len(steps[1].get("evidence_handles", []))
-        == len(steps[1].get("selected_handles", [None]))
-        and steps[1].get("evidence_handles") == steps[1].get("selected_handles")
+        and (steps[1].get("action") == "search" if v3 else steps[1].get("action") == "answer")
+        and (
+            steps[2].get("action") == "answer"
+            and steps[2].get("evidence_handles") == steps[2].get("selected_handles")
+            if v3
+            else steps[1].get("action") == "answer"
+        )
+        and (
+            steps[2].get("evidence_handles") == steps[2].get("selected_handles")
+            if v3
+            else len(steps[1].get("evidence_handles", []))
+            == len(steps[1].get("selected_handles", [None]))
+            and steps[1].get("evidence_handles") == steps[1].get("selected_handles")
+        )
     )
 
 

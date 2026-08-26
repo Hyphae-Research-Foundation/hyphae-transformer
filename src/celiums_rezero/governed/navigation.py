@@ -129,6 +129,7 @@ def derive_navigation_dataset_v2(
     provenance: str,
     search_bound: int = SEARCH_BOUND,
     score_scale: float,
+    include_continuation: bool = False,
 ) -> tuple[tuple[NavigationStep, ...], ...]:
     del provenance
     if search_bound < 1:
@@ -141,7 +142,14 @@ def derive_navigation_dataset_v2(
         *dataset.adversarial,
     ):
         trajectories.append(_derive_trajectory(record, policy, search_bound=search_bound))
-        trajectories.extend(_derive_search_initiation(record, policy, score_scale=score_scale))
+        trajectories.extend(
+            _derive_search_initiation(
+                record,
+                policy,
+                score_scale=score_scale,
+                include_continuation=include_continuation,
+            )
+        )
     return tuple(trajectories)
 
 
@@ -150,6 +158,7 @@ def _derive_search_initiation(
     policy: SufficiencyPolicy,
     *,
     score_scale: float,
+    include_continuation: bool = False,
 ) -> tuple[tuple[NavigationStep, ...], ...]:
     hits = tuple(hit for hit in record.evidence if hit.active and hit.trusted)
     if len(hits) < 2 or record.blocked or record.conflicting:
@@ -167,7 +176,7 @@ def _derive_search_initiation(
     if policy.decide(bundle) is not SufficiencyDecision.PARTIAL:
         return ()
     certificate = host_control_values(bundle, policy, HOST_CONTROL_CONTRACT)
-    return (
+    rows = [
         (
             NavigationStep(
                 record=record,
@@ -175,8 +184,31 @@ def _derive_search_initiation(
                 search_steps_used=0,
                 host_certificate=certificate,
             ),
-        ),
-    )
+        )
+    ]
+    if include_continuation and len(calibrated) >= 2:
+        partial_bundle = EvidenceBundle(
+            tenant=TenantId("training_fixture"),
+            query_digest=hashlib.sha256(record.query.encode()).hexdigest(),
+            corpus_generation=record.generation_id,
+            hits=calibrated[:2],
+            approximate=record.approximate,
+            conflicting=record.conflicting,
+            blocked=record.blocked,
+        )
+        if policy.decide(partial_bundle) is SufficiencyDecision.PARTIAL:
+            partial_certificate = host_control_values(partial_bundle, policy, HOST_CONTROL_CONTRACT)
+            rows.append(
+                (
+                    NavigationStep(
+                        record=record,
+                        step_action="search",
+                        search_steps_used=1,
+                        host_certificate=partial_certificate,
+                    ),
+                )
+            )
+    return tuple(rows)
 
 
 def search_decision_recall(

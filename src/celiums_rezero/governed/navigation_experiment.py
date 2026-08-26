@@ -44,6 +44,7 @@ from celiums_rezero.lab.serialization import canonical_json
 
 SCHEMA = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v1"
 SCHEMA_V2 = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v2"
+SCHEMA_V3 = "hyphae-transformer.gemma4-e4b-rezero-navigation-experiment/v3"
 POINTER_LOGIT_THRESHOLD = 0.5
 HYPHAE_210_SCORE_SCALE = 0.03278688524590164
 
@@ -474,12 +475,15 @@ def run_navigation_experiment_v2(
     device: torch.device,
     maximum_evidence_items: int,
     calibration_scale: float,
+    schema_version: str = "v2",
 ) -> dict[str, object]:
     _validate_preregistration(preregistration, dataset)
-    if preregistration.get("schema") != (
-        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2"
-    ):
-        raise ValueError("navigation v2 preregistration schema is invalid")
+    expected_prereg = {
+        "v2": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
+        "v3": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3",
+    }
+    if preregistration.get("schema") != expected_prereg.get(schema_version):
+        raise ValueError("navigation calibrated preregistration schema is invalid")
     policy = dataset.manifest.policy
     search = preregistration["training_search"]
     gates = preregistration["gates"]
@@ -551,7 +555,7 @@ def run_navigation_experiment_v2(
     for seed_report in cast("list[NavigationSeedReport]", selected_report["seeds"]):
         final_reports.append(dict(seed_report))
     report: dict[str, object] = {
-        "schema": SCHEMA_V2,
+        "schema": SCHEMA_V2 if schema_version == "v2" else SCHEMA_V3,
         "completed": True,
         "passed": all(
             bool(cast("dict[str, object]", item["validation"])["passed"]) for item in final_reports
@@ -574,7 +578,7 @@ def run_navigation_experiment_v2(
         "final": final_reports,
     }
     report["report_id"] = "rznp2_" + hashlib.sha256(canonical_json(report).encode()).hexdigest()
-    (output / "rezero-navigation-v2-report.json").write_text(
+    (output / f"rezero-navigation-{schema_version}-report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n"
     )
     return report
@@ -783,6 +787,7 @@ def _validate_preregistration(preregistration: dict[str, Any], dataset: Governed
     if preregistration.get("schema") not in {
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v1",
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3",
     }:
         raise ValueError("navigation preregistration schema is invalid")
     if preregistration["dataset"]["governed_dataset_id"] != dataset.manifest.dataset_id:
