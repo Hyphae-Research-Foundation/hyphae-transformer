@@ -821,16 +821,9 @@ def _campaign_script(plan: CloudCampaignPlan) -> str:
                     "--out",
                     "/runs",
                 ]
-                inner = f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}"
-                return " && ".join(
-                    (
-                        (
-                            "timeout --signal=TERM "
-                            f"{campaign_seconds}s "
-                            f"{_rocm_container_command(plan, network_none=True)} "
-                            "/bin/bash -lc " + shlex.quote(inner)
-                        ),
-                    )
+                inner = (
+                    f"cd /workspace && PYTHONPATH=/workspace/src:/python {shlex.join(command)}; "
+                    "echo '[navigation-canary] /runs after exit:' >&2; ls -la /runs >&2"
                 )
             rezero_unified = plan.campaign_command[0] == REZERO_UNIFIED_CAMPAIGN
             command = [

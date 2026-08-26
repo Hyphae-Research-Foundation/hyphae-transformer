@@ -19,6 +19,8 @@ base.REPORT_SCHEMA = "hyphae-transformer.hyphae-minilm-gemma-navigation-canary/v
 if __name__ == "__main__":
     try:
         raise SystemExit(base.main())
+    except SystemExit:
+        raise
     except BaseException:
         import traceback
 
