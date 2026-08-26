@@ -16,7 +16,7 @@
   "name": "hyphae-e4b-rezero-navigation-v4",
   "region": "mem1",
   "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
-  "revision": "0000000000000000000000000000000000000000",
+  "revision": "b69d412c3e5dc71b51536304b7cff1485febb0f7",
   "size": "gpu-mi355x1-288gb-spot",
   "ssh_key_id": "55649085",
   "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
