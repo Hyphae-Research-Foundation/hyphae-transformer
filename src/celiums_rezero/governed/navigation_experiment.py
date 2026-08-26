@@ -352,12 +352,17 @@ def evaluate_navigation(
 
 
 def build_search_report(
-    learning_rate: float, seed_reports: list[NavigationSeedReport]
+    learning_rate: float,
+    seed_reports: list[NavigationSeedReport],
+    *,
+    abstention_ranked: bool = False,
 ) -> dict[str, object]:
     return {
         "learning_rate": learning_rate,
         "seeds": seed_reports,
-        "selection_key": _selection_key(learning_rate, seed_reports),
+        "selection_key": _selection_key(
+            learning_rate, seed_reports, abstention_ranked=abstention_ranked
+        ),
     }
 
 
@@ -476,11 +481,13 @@ def run_navigation_experiment_v2(
     maximum_evidence_items: int,
     calibration_scale: float,
     schema_version: str = "v2",
+    abstention_ranked: bool = False,
 ) -> dict[str, object]:
     _validate_preregistration(preregistration, dataset)
     expected_prereg = {
         "v2": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
         "v3": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3",
+        "v3.1": "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3.1",
     }
     if preregistration.get("schema") != expected_prereg.get(schema_version):
         raise ValueError("navigation calibrated preregistration schema is invalid")
@@ -548,14 +555,22 @@ def run_navigation_experiment_v2(
                     "validation": validation,
                 }
             )
-        search_reports.append(build_search_report(learning_rate, seed_reports))
+        search_reports.append(
+            build_search_report(learning_rate, seed_reports, abstention_ranked=abstention_ranked)
+        )
     selected_report = min(search_reports, key=_selection_key_value)
     selected_rate = float(cast("float", selected_report["learning_rate"]))
     final_reports: list[dict[str, object]] = []
     for seed_report in cast("list[NavigationSeedReport]", selected_report["seeds"]):
         final_reports.append(dict(seed_report))
     report: dict[str, object] = {
-        "schema": SCHEMA_V2 if schema_version == "v2" else SCHEMA_V3,
+        "schema": (
+            SCHEMA_V2
+            if schema_version == "v2"
+            else SCHEMA_V3.replace("/v3", "/v3.1")
+            if schema_version == "v3.1"
+            else SCHEMA_V3
+        ),
         "completed": True,
         "passed": all(
             bool(cast("dict[str, object]", item["validation"])["passed"]) for item in final_reports
@@ -578,9 +593,12 @@ def run_navigation_experiment_v2(
         "final": final_reports,
     }
     report["report_id"] = "rznp2_" + hashlib.sha256(canonical_json(report).encode()).hexdigest()
-    (output / f"rezero-navigation-{schema_version}-report.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    report_name = (
+        "rezero-navigation-v3p1-report.json"
+        if schema_version == "v3.1"
+        else f"rezero-navigation-{schema_version}-report.json"
     )
+    (output / report_name).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report
 
 
@@ -770,12 +788,23 @@ def _selection_key_value(report: dict[str, object]) -> tuple[float, ...]:
     return tuple(float(value) for value in key)
 
 
-def _selection_key(rate: float, seed_reports: list[NavigationSeedReport]) -> tuple[float, ...]:
+def _selection_key(
+    rate: float,
+    seed_reports: list[NavigationSeedReport],
+    *,
+    abstention_ranked: bool = False,
+) -> tuple[float, ...]:
     validations = [value["validation"] for value in seed_reports]
     training = [value["training"] for value in seed_reports]
+    abstention = (
+        (-statistics.fmean(value["abstention_recall"] for value in validations),)
+        if abstention_ranked
+        else ()
+    )
     return (
         -sum(1.0 if value["passed"] else 0.0 for value in validations),
         statistics.fmean(value["unsafe_answer_rate"] for value in validations),
+        *abstention,
         -statistics.fmean(value["search_decision_recall"] for value in validations),
         -statistics.fmean(value["action_accuracy"] for value in validations),
         statistics.fmean(value["selected_loss"] for value in training),
@@ -788,6 +817,7 @@ def _validate_preregistration(preregistration: dict[str, Any], dataset: Governed
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v1",
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v2",
         "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3",
+        "hyphae-transformer.gemma4-e4b-rezero-navigation-preregistration/v3.1",
     }:
         raise ValueError("navigation preregistration schema is invalid")
     if preregistration["dataset"]["governed_dataset_id"] != dataset.manifest.dataset_id:

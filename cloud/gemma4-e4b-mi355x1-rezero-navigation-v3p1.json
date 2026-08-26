@@ -1,0 +1,23 @@
+{
+  "accelerator": "amd-rocm",
+  "artifact_directory": "artifacts/gemma4-e4b-mi355x1-rezero-navigation-v3p1",
+  "campaign_command": [
+    "train-gemma4-e4b-rezero-navigation-v3p1",
+    "--calibration",
+    "0.03278688524590164"
+  ],
+  "data_command": [
+    "prepare-gemma4-e4b"
+  ],
+  "hourly_rate_usd": 4.5,
+  "image": "amddevelopercloud-pytorch2100rocm724",
+  "max_cost_usd": 13.5,
+  "max_lifetime_seconds": 10800,
+  "name": "hyphae-e4b-rezero-navigation-v3p1",
+  "region": "mem1",
+  "repository_url": "https://github.com/Hyphae-Research-Foundation/hyphae-transformer.git",
+  "revision": "0000000000000000000000000000000000000000",
+  "size": "gpu-mi355x1-288gb-spot",
+  "ssh_key_id": "55649085",
+  "ssh_private_key": "/home/terrizoaguimor/.ssh/celiums-workers"
+}

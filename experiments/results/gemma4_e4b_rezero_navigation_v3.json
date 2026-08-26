@@ -1,0 +1,30 @@
+{
+  "analysis": {
+    "failing_gate": "abstention_recall",
+    "observed_abstention_recall": 0.9999999403953552,
+    "required_abstention_recall": 1.0,
+    "other_gates": {
+      "action_accuracy": 1.0,
+      "answer_recall": 1.0,
+      "evidence_exact_match": 1.0,
+      "search_decision_recall": 1.0,
+      "unsafe_answer_rate": 0.0
+    },
+    "selected_learning_rate": 0.0001,
+    "verdict": "negative: depth-3 calibrated training passes every search/evidence/unsafe gate at 1.0 but misses the exact abstention gate by one float32 tie per seed; no gate may be relaxed post-hoc"
+  },
+  "artifacts": {
+    "archive_sha256": "703ef862d3ef41ad2f42f5093d667761d3fcefd009ec6fde77c8a1f8e18b5867",
+    "cloud_execution_sha256": "2e535fbdfa42afa04a8a39ac2fa7e4ae44404a7d740d9eab38a655b1619dc3f5",
+    "report_sha256": "c7d90b13ec80f7db2575feadc847c1ddcd556910a550eb6cbc255dfe1517734a"
+  },
+  "campaign": {
+    "completed": true,
+    "droplet_id": 595201141,
+    "estimated_cost_usd": 0.606570025,
+    "lifetime_seconds": 485.25602,
+    "status": "completed"
+  },
+  "schema": "hyphae-transformer.gemma4-e4b-rezero-navigation-v3-result/v1",
+  "source_revision": "e69640f01bb0af96d95a62bf811e83c9d937e685"
+}
