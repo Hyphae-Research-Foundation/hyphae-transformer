@@ -45,6 +45,7 @@ UNIFIED_EVIDENCE = (
 NAVIGATION_EVIDENCE = (
     "navigation-campaign-report.json",
     "minilm-preflight.json",
+    "gemma4-e4b-preflight.json",
     "hyphae-daemon.stdout.log",
     "hyphae-daemon.stderr.log",
     "source-revision.txt",
