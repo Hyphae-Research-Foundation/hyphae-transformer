@@ -61,6 +61,7 @@ class NavigationEvaluation(TypedDict):
     action_accuracy: float
     answer_recall: float
     abstention_recall: float
+    abstention_counts: list[int]
     search_decision_recall: float
     evidence_exact_match: float
     unsafe_answer_rate: float
@@ -322,6 +323,10 @@ def evaluate_navigation(
     search_recall = (
         float((predicted[search_rows] == SEARCH_INDEX).float().mean()) if search_rows.any() else 1.0
     )
+    abstention_correct = (
+        int((predicted[abstain_rows] == ABSTAIN_INDEX).sum().item()) if abstain_rows.any() else 0
+    )
+    abstention_total = int(abstain_rows.numel())
     abstention_recall = (
         float((predicted[abstain_rows] == ABSTAIN_INDEX).float().mean())
         if abstain_rows.any()
@@ -345,6 +350,7 @@ def evaluate_navigation(
         "action_accuracy": action_accuracy,
         "answer_recall": answer_recall,
         "abstention_recall": abstention_recall,
+        "abstention_counts": [abstention_correct, abstention_total],
         "search_decision_recall": search_recall,
         "evidence_exact_match": evidence_exact,
         "unsafe_answer_rate": unsafe,
